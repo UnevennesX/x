@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <!-- Referer nativo para YouTube: evita Error 153 -->
     <meta name="referrer" content="strict-origin-when-cross-origin">
-    <title>Reproductor Externo con Bypass</title>
+    <title>Reproductor Externo</title>
     <style>
         * { box-sizing: border-box; }
         html, body {
@@ -35,7 +35,6 @@
 </head>
 <body>
 <div id="playerHost"></div>
-
 <script>
 (function () {
     'use strict';
@@ -48,15 +47,6 @@
     var wantPlaying = false;
     var mutedStart = false;
     var kickTimer = null;
-    var isFallbackActive = false;
-
-    // Lista de instancias de respaldo por si el video está bloqueado en YouTube
-    var fallbackInstances = [
-        'https://yewtu.be/embed/',
-        'https://invidious.drgns.space/embed/',
-        'https://inv.tux.pizza/embed/'
-    ];
-    var currentFallbackIdx = 0;
 
     function params() { return new URLSearchParams(location.search); }
     function getVideoId() {
@@ -79,31 +69,8 @@
 
     function suppressNotify(ms) { suppressNotifyUntil = Date.now() + (ms || 800); }
 
-    // Función para activar la reproducción sin restricciones cuando YouTube bloquea el embed
-    function activateFallbackPlayer(vid, autoplay) {
-        isFallbackActive = true;
-        stopKickWatchdog();
-        stopHeartbeat();
-
-        var host = document.getElementById('playerHost');
-        if (!host || !vid) return;
-
-        var baseUrl = fallbackInstances[currentFallbackIdx] || fallbackInstances[0];
-        var autoplayParam = autoplay ? '?autoplay=1' : '?autoplay=0';
-        var embedUrl = baseUrl + vid + autoplayParam;
-
-        host.innerHTML = '<iframe src="' + embedUrl + '" ' +
-            'width="100%" height="100%" frameborder="0" ' +
-            'allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" ' +
-            'allowfullscreen style="position:absolute;top:0;left:0;width:100%;height:100%;border:0;">' +
-            '</iframe>';
-
-        notify({ cmd: 'fallback_activated', videoId: vid, reason: 'embed_blocked_by_copyright' });
-    }
-
     function cmdLater(fn) {
         return function () {
-            if (isFallbackActive) return; // Si ya está en modo bypass, ignorar comandos API de YT
             if (!playerReady || !player) { pendingCmds.push(fn); return; }
             try { fn(); } catch (e) {}
         };
@@ -129,10 +96,6 @@
         var startAt = Math.max(0, Number(msg && msg.time) || 0);
         var ap = !!(msg && msg.autoplay);
         suppressNotify();
-
-        // Si veníamos de un fallback, restablecer estado
-        isFallbackActive = false;
-
         if (!playerReady || !player) {
             pendingCmds.push(function () { doLoadNow(vid, startAt, ap); });
             return;
@@ -160,7 +123,7 @@
         var tries = 0;
         kickTimer = setInterval(function () {
             tries++;
-            if (!wantPlaying || !playerReady || !player || isFallbackActive) { stopKickWatchdog(); return; }
+            if (!wantPlaying || !playerReady || !player) { stopKickWatchdog(); return; }
             var ps = -1;
             try { ps = player.getPlayerState(); } catch (e) {}
             if (ps === 1 || ps === 3) { stopKickWatchdog(); return; }
@@ -182,7 +145,7 @@
     function armUnmuteOnGesture() {
         var events = ['pointerdown', 'touchstart', 'keydown'];
         function onGesture() {
-            if (mutedStart && playerReady && player && !isFallbackActive) {
+            if (mutedStart && playerReady && player) {
                 mutedStart = false;
                 try { player.unMute(); } catch (e) {}
             }
@@ -204,8 +167,7 @@
             videoId: currentVideo,
             time: t,
             playerState: stateNum,
-            isPlaying: stateNum === 1,
-            isFallback: isFallbackActive
+            isPlaying: stateNum === 1
         };
     }
 
@@ -213,7 +175,7 @@
     function startHeartbeat() {
         stopHeartbeat();
         heartbeatTimer = setInterval(function () {
-            if (!playerReady || !player || !currentVideo || isFallbackActive) return;
+            if (!playerReady || !player || !currentVideo) return;
             notify(getStatePayload());
         }, 5000);
     }
@@ -228,9 +190,7 @@
     window.onYouTubeIframeAPIReady = function () {
         var autoplayWanted = getAutoplay();
         var initialVid = getVideoId();
-        currentVideo = initialVid;
         wantPlaying = autoplayWanted;
-
         player = new YT.Player('playerHost', {
             height: '100%',
             width: '100%',
@@ -278,16 +238,7 @@
                     else if (s === YT.PlayerState.PAUSED) notify({ cmd: 'state', isPlaying: false, videoId: currentVideo, time: safeTime() });
                     else if (s === YT.PlayerState.ENDED) notify({ cmd: 'ended', videoId: currentVideo });
                 },
-                onError: function (e) {
-                    var errCode = e && e.data;
-                    notify({ cmd: 'error', code: errCode, videoId: currentVideo });
-
-                    // Códigos 101 y 150 = Video bloqueado para incrustación (LatinAutor - UMPG / Copyright)
-                    if (errCode === 101 || errCode === 150 || errCode === 2) {
-                        console.warn("YouTube bloqueó la reproducción incrustada. Activando bypass automático...");
-                        activateFallbackPlayer(currentVideo, wantPlaying);
-                    }
-                },
+                onError: function (e) { notify({ cmd: 'error', code: e && e.data, videoId: currentVideo }); },
                 onAutoplayBlocked: function () {
                     mutedStart = true;
                     try {
