@@ -41,6 +41,7 @@
 
     var player = null;
     var playerReady = false;
+    var ytReady = false;
     var currentVideo = null;
     var pendingCmds = [];
     var suppressNotifyUntil = 0;
@@ -97,6 +98,7 @@
         var ap = !!(msg && msg.autoplay);
         suppressNotify();
         if (!playerReady || !player) {
+            ensurePlayer();
             pendingCmds.push(function () { doLoadNow(vid, startAt, ap); });
             return;
         }
@@ -187,18 +189,35 @@
         try { return player ? player.getCurrentTime() : 0; } catch (e) { return 0; }
     }
 
-    window.onYouTubeIframeAPIReady = function () {
+window.onYouTubeIframeAPIReady = function () {
+        ytReady = true;
         var autoplayWanted = getAutoplay();
         var initialVid = getVideoId();
-        wantPlaying = autoplayWanted;
+        // Solo se crea el reproductor si ya hay un video (URL ?v=... o un
+        // comando 'load' pendiente). Si la página se abre vacía, no se monta
+        // el iframe de YouTube para no mostrar el error "Se produjo un error".
+        if (initialVid) {
+            wantPlaying = autoplayWanted;
+            createPlayer(initialVid, autoplayWanted);
+        }
+    };
+
+    function ensurePlayer() {
+        if (!player && ytReady) {
+            createPlayer(currentVideo || '', wantPlaying);
+        }
+    }
+
+    function createPlayer(vid, ap) {
+        if (player) return;
         player = new YT.Player('playerHost', {
             height: '100%',
             width: '100%',
-            videoId: initialVid || '',
+            videoId: vid || '',
             playerVars: {
                 enablejsapi: 1,
-                autoplay: autoplayWanted ? 1 : 0,
-                mute: autoplayWanted ? 1 : 0,
+                autoplay: ap ? 1 : 0,
+                mute: ap ? 1 : 0,
                 controls: 1,
                 disablekb: 0,
                 fs: 1,
