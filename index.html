@@ -11,23 +11,16 @@
 <body>
     <div id="playerHost" style="max-width:860px;margin:auto;">
         <media-player
+            id="rmExternalPlayer"
+            class="vds-player"
             src=""
-            load="visible"
-            aspect-ratio="16/9"
+            view-type="video"
+            stream-type="on-demand"
+            log-level="warn"
+            crossorigin=""
             playsinline
+            aspect-ratio="16/9"
         >
-        <script>
-          const params = new URLSearchParams(window.location.search);
-          const videoId = params.get('v');
-          const autoplay = params.get('autoplay');
-          if (videoId) {
-            const player = document.querySelector('media-player');
-            if (player) {
-              player.setAttribute('src', `youtube/${videoId}`);
-              if (autoplay === '1') player.setAttribute('autoplay', '');
-            }
-          }
-        </script>
             <media-provider></media-provider>
             <media-controls class="vds-controls">
                 <media-controls-group class="vds-controls-group top-right">
@@ -51,5 +44,17 @@
             </media-controls>
         </media-player>
     </div>
+    <script>
+        const params = new URLSearchParams(window.location.search);
+        const videoId = params.get('v');
+        const autoplay = params.get('autoplay');
+        if (videoId) {
+            const player = document.getElementById('rmExternalPlayer');
+            if (player) {
+                player.setAttribute('src', `youtube/${videoId}`);
+                if (autoplay === '1') player.setAttribute('autoplay', '');
+            }
+        }
+    </script>
 </body>
 </html>
