@@ -29,29 +29,20 @@
       position: fixed;
       inset: 0;
       background: #000;
+      display: flex;
+      align-items: center;
+      justify-content: center;
     }
 
-    /* El reproductor empieza oculto para que no se vea el pause/buffer inicial */
-    #playerContainer {
-      width: 100%;
-      height: 100%;
-      opacity: 0;
-      transition: opacity 0.35s cubic-bezier(0.4, 0, 0.2, 1);
-    }
-
-    /* Se hace visible solo cuando ya está reproduciendo */
-    #playerContainer.ready-playing {
-      opacity: 1;
-    }
-
-    #player, iframe {
+    /* El iframe ocupa siempre el 100% */
+    #player-frame, iframe {
       width: 100% !important;
       height: 100% !important;
-      border: 0;
+      border: 0 !important;
       display: block;
     }
 
-    /* Cartel flotante para activar el sonido */
+    /* Mensaje flotante para activar el sonido */
     #soundHint {
       position: absolute;
       bottom: 80px;
@@ -59,7 +50,7 @@
       transform: translateX(-50%);
       padding: 10px 22px;
       background: rgba(15, 15, 15, 0.85);
-      border: 1px solid rgba(255, 255, 255, 0.25);
+      border: 1px solid rgba(255, 255, 255, 0.3);
       border-radius: 999px;
       font-size: 14px;
       font-weight: 500;
@@ -67,13 +58,12 @@
       z-index: 50;
       pointer-events: none;
       opacity: 0;
-      transition: opacity 0.3s ease, transform 0.3s ease;
+      transition: opacity 0.3s ease;
       backdrop-filter: blur(8px);
-      box-shadow: 0 4px 16px rgba(0,0,0,0.6);
+      box-shadow: 0 4px 16px rgba(0, 0, 0, 0.6);
     }
     #soundHint.show {
       opacity: 1;
-      transform: translateX(-50%) translateY(0);
     }
 
     #msg {
@@ -94,34 +84,30 @@
 
 <body>
   <div id="stage">
-    <div id="playerContainer">
-      <div id="player"></div>
-    </div>
+    <!-- El iframe se inyecta directamente para forzar autoplay inmediato -->
+    <div id="player-container" style="width: 100%; height: 100%;"></div>
 
-    <div id="soundHint">🔊 Toca para activar el sonido</div>
+    <div id="soundHint">🔊 Toca la pantalla para activar el sonido</div>
     <div id="msg">
       Falta el parámetro <code>?v=VIDEO_ID</code> en la URL.
     </div>
   </div>
 
+  <!-- API de YouTube -->
   <script src="https://www.youtube.com/iframe_api"></script>
 
   <script>
     const params = new URLSearchParams(window.location.search);
     const initialVideoId = (params.get("v") || "").trim();
-    // Por defecto autoplay activado si no se especifica lo contrario
-    const initialAutoplay = params.get("autoplay") !== "0"; 
+    const initialAutoplay = params.get("autoplay") !== "0";
     const initialTime = Math.max(0, Number(params.get("t")) || 0);
 
-    const playerContainer = document.getElementById("playerContainer");
+    const playerContainer = document.getElementById("player-container");
     const soundHint = document.getElementById("soundHint");
     const msg = document.getElementById("msg");
 
     let player = null;
-    let isApiReady = false;
     let currentVideoId = "";
-    let wantsAutoplay = false;
-    let pendingSeek = 0;
     let endedReported = false;
     let soundUnlocked = false;
     let timeInterval = null;
@@ -142,10 +128,11 @@
       if (soundUnlocked || !player) return;
       soundUnlocked = true;
       try {
-        player.unMute();
-        if (player.getVolume() === 0) player.setVolume(100);
+        if (typeof player.unMute === "function") player.unMute();
+        if (typeof player.setVolume === "function" && player.getVolume() === 0) {
+          player.setVolume(100);
+        }
       } catch {}
-      try { player.playVideo(); } catch {}
       hideHint();
       window.removeEventListener("pointerdown", unlockSound);
       window.removeEventListener("keydown", unlockSound);
@@ -181,127 +168,111 @@
       }
     }
 
-    window.onYouTubeIframeAPIReady = function() {
-      isApiReady = true;
-      if (initialVideoId) {
-        loadVideo(initialVideoId, initialAutoplay, initialTime);
-      } else {
-        msg.classList.add("show");
-      }
-    };
+    function buildIframe(videoId, startSeconds) {
+      currentVideoId = videoId;
+      endedReported = false;
+      soundUnlocked = false;
 
-    function createPlayer(videoId) {
-      player = new YT.Player("player", {
-        videoId: videoId,
-        playerVars: {
-          autoplay: 1,      // Siempre fuerza autoplay
-          mute: 1,          // CLAVE: Arranca muteado para que el navegador NUNCA lo pause
-          controls: 1,      // Menú nativo con selector de calidad
-          rel: 0,
-          modestbranding: 1,
-          playsinline: 1,
-          enablejsapi: 1,
-          origin: window.location.origin
-        },
-        events: {
-          onReady: (event) => {
-            if (pendingSeek > 0) {
-              try { event.target.seekTo(pendingSeek, true); } catch {}
-              pendingSeek = 0;
-            }
+      // Creamos el iframe directamente con autoplay=1 y mute=1 en el SRC
+      playerContainer.innerHTML = `
+        <iframe 
+          id="player-frame"
+          src="https://www.youtube.com/embed/${videoId}?autoplay=1&mute=1&controls=1&enablejsapi=1&playsinline=1&rel=0&modestbranding=1&start=${startSeconds}"
+          allow="autoplay; fullscreen; encrypted-media; picture-in-picture"
+          allowfullscreen>
+        </iframe>
+      `;
 
-            post({ type: "ready", videoId: currentVideoId });
-
-            // Forzar inicio inmediato
-            try {
-              event.target.playVideo();
-            } catch {}
-
-            // Intentar desmutear; si el navegador lo permite lo deja con audio, si no, espera al primer clic
-            try {
-              event.target.unMute();
-              soundUnlocked = true;
-            } catch {
-              showHint();
-              armUnlockOnFirstInteraction();
-            }
-          },
-          onStateChange: (event) => {
-            if (event.data === YT.PlayerState.PLAYING) {
-              endedReported = false;
-              // Revelar el video suavemente solo cuando ya está rodando
-              playerContainer.classList.add("ready-playing");
-              startTimeTracker();
-
-              // Si está silenciado, mostramos el aviso para activar sonido
-              if (player.isMuted && player.isMuted()) {
+      // Vinculamos la API al iframe ya creado
+      function attachAPI() {
+        if (window.YT && window.YT.Player) {
+          player = new YT.Player("player-frame", {
+            events: {
+              onReady: (event) => {
+                post({ type: "ready", videoId: currentVideoId });
+                // Forzamos inicio por seguridad adicional
+                try { event.target.playVideo(); } catch {}
                 showHint();
                 armUnlockOnFirstInteraction();
-              } else {
-                hideHint();
-              }
-
-              post({
-                type: "state",
-                state: "playing",
-                videoId: currentVideoId,
-                time: Number(player.getCurrentTime()) || 0
-              });
-            } else if (event.data === YT.PlayerState.PAUSED) {
-              stopTimeTracker();
-              post({
-                type: "state",
-                state: "paused",
-                videoId: currentVideoId,
-                time: Number(player.getCurrentTime()) || 0
-              });
-            } else if (event.data === YT.PlayerState.ENDED) {
-              stopTimeTracker();
-              if (!endedReported) {
-                endedReported = true;
+              },
+              onStateChange: (event) => {
+                if (event.data === YT.PlayerState.PLAYING) {
+                  endedReported = false;
+                  startTimeTracker();
+                  post({
+                    type: "state",
+                    state: "playing",
+                    videoId: currentVideoId,
+                    time: Number(player.getCurrentTime()) || 0
+                  });
+                } else if (event.data === YT.PlayerState.PAUSED) {
+                  stopTimeTracker();
+                  post({
+                    type: "state",
+                    state: "paused",
+                    videoId: currentVideoId,
+                    time: Number(player.getCurrentTime()) || 0
+                  });
+                } else if (event.data === YT.PlayerState.ENDED) {
+                  stopTimeTracker();
+                  if (!endedReported) {
+                    endedReported = true;
+                    post({
+                      type: "ended",
+                      videoId: currentVideoId,
+                      time: Number(player.getDuration()) || 0
+                    });
+                  }
+                }
+              },
+              onError: (event) => {
                 post({
-                  type: "ended",
+                  type: "error",
                   videoId: currentVideoId,
-                  time: Number(player.getDuration()) || 0
+                  code: event.data,
+                  message: "Error al reproducir el video."
                 });
               }
             }
-          },
-          onError: (event) => {
-            playerContainer.classList.add("ready-playing");
-            post({
-              type: "error",
-              videoId: currentVideoId,
-              code: event.data,
-              message: "Error al reproducir el video."
-            });
-          }
+          });
+        } else {
+          setTimeout(attachAPI, 50);
         }
-      });
+      }
+
+      attachAPI();
     }
 
     function loadVideo(id, autoplay, time) {
       if (!id) return;
-      currentVideoId = String(id).trim();
-      wantsAutoplay = !!autoplay;
-      pendingSeek = Math.max(0, Number(time) || 0);
-      endedReported = false;
-
-      if (!isApiReady) return;
+      const startSec = Math.max(0, Number(time) || 0);
 
       if (!player) {
-        createPlayer(currentVideoId);
+        buildIframe(id, startSec);
       } else {
-        // Al cambiar de video, ocultamos un momento hasta que arranque el nuevo
-        playerContainer.classList.remove("ready-playing");
-        player.loadVideoById({
-          videoId: currentVideoId,
-          startSeconds: pendingSeek
-        });
+        currentVideoId = id;
+        endedReported = false;
+        try {
+          player.loadVideoById({
+            videoId: id,
+            startSeconds: startSec
+          });
+          player.mute();
+          player.playVideo();
+        } catch {
+          buildIframe(id, startSec);
+        }
       }
     }
 
-    // Receptor de mensajes del padre
+    // Inicialización
+    if (initialVideoId) {
+      loadVideo(initialVideoId, initialAutoplay, initialTime);
+    } else {
+      msg.classList.add("show");
+    }
+
+    // Mensajería con la app padre
     window.addEventListener("message", (event) => {
       const data = event?.data;
       if (!data || data.source !== "voice-eva" || !player) return;
