@@ -6,6 +6,10 @@
     <!-- Referer nativo para YouTube: evita Error 153 -->
     <meta name="referrer" content="strict-origin-when-cross-origin">
     <title>Reproductor Externo</title>
+
+    <!-- Componente lite-youtube oficial de Justin Ribeiro -->
+    <script type="module" src="https://cdn.jsdelivr.net/npm/@justinribeiro/lite-youtube@1.5.0/lite-youtube.js"></script>
+
     <style>
         * { box-sizing: border-box; }
         html, body {
@@ -22,6 +26,16 @@
             left: 0;
             width: 100%;
             height: 100%;
+        }
+        /* Ajuste de lite-youtube para cubrir 100% del contenedor */
+        lite-youtube {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100% !important;
+            height: 100% !important;
+            max-width: 100% !important;
+            background-color: #000;
         }
         #playerHost iframe {
             position: absolute;
@@ -48,6 +62,7 @@
     var wantPlaying = false;
     var mutedStart = false;
     var kickTimer = null;
+    var liteElement = null;
 
     function params() { return new URLSearchParams(location.search); }
     function getVideoId() {
@@ -72,7 +87,11 @@
 
     function cmdLater(fn) {
         return function () {
-            if (!playerReady || !player) { pendingCmds.push(fn); return; }
+            if (!playerReady || !player) {
+                pendingCmds.push(fn);
+                activateLiteFacade();
+                return;
+            }
             try { fn(); } catch (e) {}
         };
     }
@@ -97,9 +116,13 @@
         var startAt = Math.max(0, Number(msg && msg.time) || 0);
         var ap = !!(msg && msg.autoplay);
         suppressNotify();
+
         if (!playerReady || !player) {
-            ensurePlayer();
+            currentVideo = vid;
+            wantPlaying = ap;
+            ensurePlayer(vid, ap);
             pendingCmds.push(function () { doLoadNow(vid, startAt, ap); });
+            if (ap) { activateLiteFacade(); }
             return;
         }
         doLoadNow(vid, startAt, ap);
@@ -189,85 +212,119 @@
         try { return player ? player.getCurrentTime() : 0; } catch (e) { return 0; }
     }
 
-window.onYouTubeIframeAPIReady = function () {
-        ytReady = true;
-        var autoplayWanted = getAutoplay();
-        var initialVid = getVideoId();
-        // Solo se crea el reproductor si ya hay un video (URL ?v=... o un
-        // comando 'load' pendiente). Si la página se abre vacía, no se monta
-        // el iframe de YouTube para no mostrar el error "Se produjo un error".
-        if (initialVid) {
-            wantPlaying = autoplayWanted;
-            createPlayer(initialVid, autoplayWanted);
-        }
-    };
-
-    function ensurePlayer() {
-        if (!player && ytReady) {
-            createPlayer(currentVideo || '', wantPlaying);
+    function activateLiteFacade() {
+        if (liteElement && !player) {
+            liteElement.click();
         }
     }
 
-    function createPlayer(vid, ap) {
-        if (player) return;
-        player = new YT.Player('playerHost', {
-            height: '100%',
-            width: '100%',
-            videoId: vid || '',
-            playerVars: {
-                enablejsapi: 1,
-                autoplay: ap ? 1 : 0,
-                mute: ap ? 1 : 0,
-                controls: 1,
-                disablekb: 0,
-                fs: 1,
-                rel: 0,
-                modestbranding: 1,
-                playsinline: 1,
-                iv_load_policy: 3,
-                origin: location.origin || ''
-            },
-            events: {
-                onReady: function () {
-                    playerReady = true;
-                    var q = pendingCmds.slice();
-                    pendingCmds.length = 0;
-                    for (var i = 0; i < q.length; i++) { try { q[i](); } catch (e) {} }
-                    armUnmuteOnGesture();
-                    if (wantPlaying) {
-                        mutedStart = true;
-                        try { player.mute(); } catch (e) {}
-                        startKickWatchdog();
-                    }
-                    startHeartbeat();
-                    notify({ cmd: 'ready', videoId: currentVideo });
-                },
-                onStateChange: function (e) {
-                    var s = e.data;
-                    if (s === YT.PlayerState.PLAYING) {
-                        if (mutedStart && playerReady && player) {
-                            mutedStart = false;
-                            stopKickWatchdog();
-                            try { player.unMute(); } catch (err) {}
+    function ensurePlayer(vid, ap) {
+        var host = document.getElementById('playerHost');
+        if (!liteElement) {
+            liteElement = document.createElement('lite-youtube');
+            liteElement.setAttribute('videoid', vid || '');
+            
+            // Pasamos los parámetros de YouTube requeridos vía el atributo params
+            var origin = encodeURIComponent(location.origin || '');
+            var p = 'enablejsapi=1&origin=' + origin + '&rel=0&modestbranding=1&playsinline=1&iv_load_policy=3&controls=1&fs=1';
+            if (ap) { p += '&autoplay=1&mute=1'; }
+            liteElement.setAttribute('params', p);
+
+            // Escuchar cuando el componente inserte el iframe para conectar YT.Player
+            liteElement.addEventListener('liteYoutubeIframeLoaded', function () {
+                attachPlayerFromLite();
+            });
+
+            host.innerHTML = '';
+            host.appendChild(liteElement);
+        } else if (vid && liteElement.getAttribute('videoid') !== vid) {
+            liteElement.setAttribute('videoid', vid);
+        }
+    }
+
+    function attachPlayerFromLite() {
+        if (player || !liteElement) return;
+        
+        var iframe = null;
+        if (liteElement.shadowRoot) {
+            iframe = liteElement.shadowRoot.querySelector('iframe');
+        }
+        if (!iframe) {
+            iframe = liteElement.querySelector('iframe');
+        }
+        if (!iframe) return;
+
+        function initYT() {
+            player = new YT.Player(iframe, {
+                events: {
+                    onReady: function () {
+                        playerReady = true;
+                        var q = pendingCmds.slice();
+                        pendingCmds.length = 0;
+                        for (var i = 0; i < q.length; i++) { try { q[i](); } catch (e) {} }
+                        armUnmuteOnGesture();
+                        if (wantPlaying) {
+                            mutedStart = true;
+                            try { player.mute(); } catch (e) {}
+                            try { player.playVideo(); } catch (e) {}
+                            startKickWatchdog();
                         }
-                        stopKickWatchdog();
+                        startHeartbeat();
+                        notify({ cmd: 'ready', videoId: currentVideo });
+                    },
+                    onStateChange: function (e) {
+                        var s = e.data;
+                        if (s === YT.PlayerState.PLAYING) {
+                            if (mutedStart && playerReady && player) {
+                                mutedStart = false;
+                                stopKickWatchdog();
+                                try { player.unMute(); } catch (err) {}
+                            }
+                            stopKickWatchdog();
+                        }
+                        if (Date.now() < suppressNotifyUntil) return;
+                        if (s === YT.PlayerState.PLAYING) notify({ cmd: 'state', isPlaying: true, videoId: currentVideo, time: safeTime() });
+                        else if (s === YT.PlayerState.PAUSED) notify({ cmd: 'state', isPlaying: false, videoId: currentVideo, time: safeTime() });
+                        else if (s === YT.PlayerState.ENDED) notify({ cmd: 'ended', videoId: currentVideo });
+                    },
+                    onError: function (e) { notify({ cmd: 'error', code: e && e.data, videoId: currentVideo }); },
+                    onAutoplayBlocked: function () {
+                        mutedStart = true;
+                        try {
+                            player.mute();
+                            player.playVideo();
+                        } catch (e) {}
+                        notify({ cmd: 'autoplay_blocked', videoId: currentVideo });
                     }
-                    if (Date.now() < suppressNotifyUntil) return;
-                    if (s === YT.PlayerState.PLAYING) notify({ cmd: 'state', isPlaying: true, videoId: currentVideo, time: safeTime() });
-                    else if (s === YT.PlayerState.PAUSED) notify({ cmd: 'state', isPlaying: false, videoId: currentVideo, time: safeTime() });
-                    else if (s === YT.PlayerState.ENDED) notify({ cmd: 'ended', videoId: currentVideo });
-                },
-                onError: function (e) { notify({ cmd: 'error', code: e && e.data, videoId: currentVideo }); },
-                onAutoplayBlocked: function () {
-                    mutedStart = true;
-                    try {
-                        player.mute();
-                        player.playVideo();
-                    } catch (e) {}
-                    notify({ cmd: 'autoplay_blocked', videoId: currentVideo });
                 }
+            });
+        }
+
+        if (window.YT && window.YT.Player) {
+            initYT();
+        } else {
+            var interval = setInterval(function () {
+                if (window.YT && window.YT.Player) {
+                    clearInterval(interval);
+                    initYT();
+                }
+            }, 50);
+        }
+    }
+
+    window.onYouTubeIframeAPIReady = function () {
+        ytReady = true;
+        var autoplayWanted = getAutoplay();
+        var initialVid = getVideoId();
+
+        if (initialVid) {
+            currentVideo = initialVid;
+            wantPlaying = autoplayWanted;
+            ensurePlayer(initialVid, autoplayWanted);
+            if (autoplayWanted) {
+                activateLiteFacade();
             }
-        });
+        }
     };
 
     window.addEventListener('message', function (e) {
@@ -289,9 +346,11 @@ window.onYouTubeIframeAPIReady = function () {
         }
     }, false);
 
+    // Carga de la API base de YouTube Iframe
     var tag = document.createElement('script');
     tag.src = 'https://www.youtube.com/iframe_api';
     document.head.appendChild(tag);
+
     notify({ cmd: 'ready', videoId: currentVideo, early: true });
 })();
 </script>
