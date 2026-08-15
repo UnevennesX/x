@@ -9,9 +9,6 @@
   <title>Voice Eva Player</title>
   <link rel="icon" href="data:," />
 
-  <!-- Estilos de Plyr -->
-  <link rel="stylesheet" href="https://cdn.plyr.io/3.7.8/plyr.css" />
-
   <style>
     * {
       box-sizing: border-box;
@@ -32,41 +29,24 @@
       position: fixed;
       inset: 0;
       background: #000;
-      display: flex;
-      align-items: center;
-      justify-content: center;
     }
 
-    /* El contenedor y reproductor llenan toda la pantalla */
-    .plyr-container {
-      width: 100%;
-      height: 100%;
-    }
-
-    .plyr {
+    /* El iframe nativo llena el 100% */
+    #player, iframe {
       width: 100% !important;
       height: 100% !important;
-      background: #000;
-      --plyr-color-main: #00b3ff; /* Color de acento / barra de progreso */
-      --plyr-video-background: #000;
+      border: 0;
+      display: block;
     }
 
-    .plyr__video-wrapper {
-      height: 100% !important;
-    }
-
-    .plyr iframe {
-      pointer-events: none; /* Permite que los clics usen los controles de Plyr */
-    }
-
-    /* Aviso cuando el autoplay inicia muteado por políticas del navegador */
+    /* Aviso cuando el autoplay inicia muteado */
     #soundHint {
       position: absolute;
-      bottom: 90px;
+      bottom: 80px;
       left: 50%;
       transform: translateX(-50%);
-      padding: 8px 18px;
-      background: rgba(0, 0, 0, 0.8);
+      padding: 10px 20px;
+      background: rgba(0, 0, 0, 0.85);
       border: 1px solid rgba(255, 255, 255, 0.25);
       border-radius: 999px;
       font-size: 14px;
@@ -75,13 +55,13 @@
       pointer-events: none;
       opacity: 0;
       transition: opacity 0.25s ease;
-      backdrop-filter: blur(8px);
+      box-shadow: 0 4px 12px rgba(0,0,0,0.5);
     }
     #soundHint.show {
       opacity: 1;
     }
 
-    /* Mensaje si falta el parámetro ?v= */
+    /* Mensaje si falta ?v= */
     #msg {
       position: absolute;
       inset: 0;
@@ -100,18 +80,15 @@
 
 <body>
   <div id="stage">
-    <div class="plyr-container" id="playerWrapper">
-      <div id="player"></div>
-    </div>
-
-    <div id="soundHint">🔊 Toca para activar el sonido</div>
+    <div id="player"></div>
+    <div id="soundHint">🔊 Toca la pantalla para activar el sonido</div>
     <div id="msg">
       Falta el parámetro <code>?v=VIDEO_ID</code> en la URL.
     </div>
   </div>
 
-  <!-- Librería Plyr -->
-  <script src="https://cdn.plyr.io/3.7.8/plyr.polyfilled.js"></script>
+  <!-- API oficial de Iframe de YouTube -->
+  <script src="https://www.youtube.com/iframe_api"></script>
 
   <script>
     const params = new URLSearchParams(window.location.search);
@@ -123,11 +100,13 @@
     const msg = document.getElementById("msg");
 
     let player = null;
+    let isApiReady = false;
     let currentVideoId = "";
     let wantsAutoplay = false;
     let pendingSeek = 0;
     let endedReported = false;
     let soundUnlocked = false;
+    let timeInterval = null;
 
     function post(m) {
       try {
@@ -141,22 +120,14 @@
     function showHint() { soundHint.classList.add("show"); }
     function hideHint() { soundHint.classList.remove("show"); }
 
-    function safePlay() {
-      if (!player) return;
-      try {
-        const p = player.play();
-        if (p?.catch) p.catch(() => {});
-      } catch {}
-    }
-
     function unlockSound() {
       if (soundUnlocked || !player) return;
       soundUnlocked = true;
       try {
-        player.muted = false;
-        if (player.volume === 0) player.volume = 1;
+        player.unMute();
+        if (player.getVolume() === 0) player.setVolume(100);
       } catch {}
-      safePlay();
+      try { player.playVideo(); } catch {}
       hideHint();
       window.removeEventListener("pointerdown", unlockSound);
       window.removeEventListener("keydown", unlockSound);
@@ -169,125 +140,114 @@
       window.addEventListener("touchstart", unlockSound, { passive: true });
     }
 
-    function initPlyrInstance() {
-      player = new Plyr("#player", {
-        autoplay: wantsAutoplay,
-        muted: false,
-        hideControls: true,
-        tooltips: { controls: true, seek: true },
-        // Controles que incluyen selector de calidad, velocidad y ajustes
-        controls: [
-          'play-large',
-          'restart',
-          'rewind',
-          'play',
-          'fast-forward',
-          'progress',
-          'current-time',
-          'duration',
-          'mute',
-          'volume',
-          'captions',
-          'settings',
-          'pip',
-          'airplay',
-          'fullscreen'
-        ],
-        // El menú de ajustes incluye Quality (calidad), Speed y Captions
-        settings: ['quality', 'speed', 'loop', 'captions'],
-        quality: {
-          default: 1080,
-          options: [4320, 2160, 1440, 1080, 720, 576, 480, 360, 240]
-        },
-        speed: {
-          selected: 1,
-          options: [0.5, 0.75, 1, 1.25, 1.5, 2]
-        },
-        youtube: {
-          noCookie: false,
-          rel: 0,
-          showinfo: 0,
-          iv_load_policy: 3,
-          modestbranding: 1
-        }
-      });
-
-      // Eventos de Plyr
-      player.on("ready", () => {
-        if (pendingSeek > 0) {
-          try { player.currentTime = pendingSeek; } catch {}
-          pendingSeek = 0;
-        }
-
-        post({ type: "ready", videoId: currentVideoId });
-
-        if (wantsAutoplay) {
+    function startTimeTracker() {
+      stopTimeTracker();
+      timeInterval = setInterval(() => {
+        if (player && typeof player.getCurrentTime === "function") {
           try {
-            const p = player.play();
-            if (p?.then) {
-              p.then(() => {
-                soundUnlocked = true;
-                hideHint();
-              }).catch(() => {
-                try { player.muted = true; } catch {}
-                safePlay();
-                showHint();
-                armUnlockOnFirstInteraction();
-              });
+            post({
+              type: "time-update",
+              videoId: currentVideoId,
+              time: Number(player.getCurrentTime()) || 0,
+              duration: Number(player.getDuration()) || 0
+            });
+          } catch {}
+        }
+      }, 250);
+    }
+
+    function stopTimeTracker() {
+      if (timeInterval) {
+        clearInterval(timeInterval);
+        timeInterval = null;
+      }
+    }
+
+    // Callback obligatorio de YouTube al cargar la API
+    window.onYouTubeIframeAPIReady = function() {
+      isApiReady = true;
+      if (initialVideoId) {
+        loadVideo(initialVideoId, initialAutoplay, initialTime);
+      } else {
+        msg.classList.add("show");
+      }
+    };
+
+    function createPlayer(videoId) {
+      player = new YT.Player("player", {
+        videoId: videoId,
+        playerVars: {
+          autoplay: wantsAutoplay ? 1 : 0,
+          controls: 1, // Controles nativos de YouTube (engranaje, calidad, etc.)
+          rel: 0,
+          modestbranding: 1,
+          playsinline: 1,
+          enablejsapi: 1,
+          origin: window.location.origin
+        },
+        events: {
+          onReady: (event) => {
+            if (pendingSeek > 0) {
+              try { event.target.seekTo(pendingSeek, true); } catch {}
+              pendingSeek = 0;
             }
-          } catch {
-            try { player.muted = true; } catch {}
-            safePlay();
-            showHint();
-            armUnlockOnFirstInteraction();
+
+            post({ type: "ready", videoId: currentVideoId });
+
+            if (wantsAutoplay) {
+              try {
+                event.target.playVideo();
+                soundUnlocked = true;
+              } catch {
+                try {
+                  event.target.mute();
+                  event.target.playVideo();
+                  showHint();
+                  armUnlockOnFirstInteraction();
+                } catch {}
+              }
+            }
+          },
+          onStateChange: (event) => {
+            // YT.PlayerState: UNSTARTED (-1), ENDED (0), PLAYING (1), PAUSED (2), BUFFERING (3), CUED (5)
+            if (event.data === YT.PlayerState.PLAYING) {
+              endedReported = false;
+              startTimeTracker();
+              post({
+                type: "state",
+                state: "playing",
+                videoId: currentVideoId,
+                time: Number(player.getCurrentTime()) || 0
+              });
+            } else if (event.data === YT.PlayerState.PAUSED) {
+              stopTimeTracker();
+              post({
+                type: "state",
+                state: "paused",
+                videoId: currentVideoId,
+                time: Number(player.getCurrentTime()) || 0
+              });
+            } else if (event.data === YT.PlayerState.ENDED) {
+              stopTimeTracker();
+              if (!endedReported) {
+                endedReported = true;
+                post({
+                  type: "ended",
+                  videoId: currentVideoId,
+                  time: Number(player.getDuration()) || 0
+                });
+              }
+            }
+          },
+          onError: (event) => {
+            post({
+              type: "error",
+              videoId: currentVideoId,
+              code: event.data,
+              message: "Error al reproducir el video de YouTube."
+            });
           }
         }
-      });
-
-      player.on("timeupdate", () => {
-        post({
-          type: "time-update",
-          videoId: currentVideoId,
-          time: Number(player.currentTime) || 0,
-          duration: Number(player.duration) || 0
-        });
-      });
-
-      player.on("playing", () => {
-        endedReported = false;
-        post({
-          type: "state",
-          state: "playing",
-          videoId: currentVideoId,
-          time: Number(player.currentTime) || 0
-        });
-      });
-
-      player.on("pause", () => {
-        post({
-          type: "state",
-          state: "paused",
-          videoId: currentVideoId,
-          time: Number(player.currentTime) || 0
-        });
-      });
-
-      player.on("ended", () => {
-        if (endedReported) return;
-        endedReported = true;
-        post({
-          type: "ended",
-          videoId: currentVideoId,
-          time: Number(player.currentTime) || 0
-        });
-      });
-
-      player.on("error", (e) => {
-        post({
-          type: "error",
-          videoId: currentVideoId,
-          message: "Error al reproducir el video."
-        });
       });
     }
 
@@ -299,79 +259,66 @@
       endedReported = false;
       soundUnlocked = false;
 
+      if (!isApiReady) return;
+
       if (!player) {
-        // Primera inicialización
-        const playerEl = document.getElementById("player");
-        playerEl.setAttribute("data-plyr-provider", "youtube");
-        playerEl.setAttribute("data-plyr-embed-id", currentVideoId);
-        initPlyrInstance();
+        createPlayer(currentVideoId);
       } else {
-        // Cambio dinámico de video
-        player.source = {
-          type: 'video',
-          sources: [
-            {
-              src: currentVideoId,
-              provider: 'youtube'
-            }
-          ]
-        };
+        if (wantsAutoplay) {
+          player.loadVideoById({
+            videoId: currentVideoId,
+            startSeconds: pendingSeek
+          });
+        } else {
+          player.cueVideoById({
+            videoId: currentVideoId,
+            startSeconds: pendingSeek
+          });
+        }
       }
     }
 
-    // Receptor de mensajes del contenedor padre
+    // Receptor de comandos por postMessage desde la app padre
     window.addEventListener("message", (event) => {
       const data = event?.data;
-      if (!data || data.source !== "voice-eva") return;
+      if (!data || data.source !== "voice-eva" || !player) return;
 
       switch (data.type) {
         case "load":
           loadVideo(data.videoId, !!data.autoplay, Number(data.time) || 0);
           break;
         case "play":
-          safePlay();
+          try { player.playVideo(); } catch {}
           break;
         case "pause":
-          try { player?.pause(); } catch {}
+          try { player.pauseVideo(); } catch {}
           break;
         case "stop":
           try {
-            if (player) {
-              player.pause();
-              player.currentTime = 0;
-            }
+            player.stopVideo();
             endedReported = false;
           } catch {}
           break;
         case "seek":
-          if (Number.isFinite(Number(data.time)) && player) {
-            try { player.currentTime = Number(data.time); } catch {}
+          if (Number.isFinite(Number(data.time))) {
+            try { player.seekTo(Number(data.time), true); } catch {}
           }
           break;
         case "mute":
-          try { if (player) player.muted = true; } catch {}
+          try { player.mute(); } catch {}
           break;
         case "unmute":
-          try { if (player) player.muted = false; } catch {}
+          try { player.unMute(); } catch {}
           break;
         case "setVolume": {
           const v = Number(data.volume);
-          if (Number.isFinite(v) && player) {
-            try {
-              player.volume = Math.min(1, Math.max(0, v / 100));
-            } catch {}
+          if (Number.isFinite(v)) {
+            try { player.setVolume(Math.min(100, Math.max(0, v))); } catch {}
           }
           break;
         }
       }
     });
-
-    // Iniciar con los parámetros iniciales
-    if (initialVideoId) {
-      loadVideo(initialVideoId, initialAutoplay, initialTime);
-    } else {
-      msg.classList.add("show");
-    }
   </script>
 </body>
 </html>
