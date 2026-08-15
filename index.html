@@ -1,81 +1,44 @@
 <!DOCTYPE html>
 <html lang="es">
 <head>
-  <meta charset="UTF-8">
-  <title>Vidstack - Solo Calidad</title>
-  
-  <!-- CDN de Vidstack Elements -->
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Vidstack - Solo Calidad Oficial</title>
+
+  <!-- 1. Hojas de estilo oficiales del Default Theme -->
   <link rel="stylesheet" href="https://cdn.vidstack.io/player/theme.css" />
+  <link rel="stylesheet" href="https://cdn.vidstack.io/player/video.css" />
+
+  <!-- 2. Registro de elementos e iconos oficiales -->
   <script type="module" src="https://cdn.vidstack.io/player"></script>
+  <script type="module" src="https://cdn.vidstack.io/player/icons"></script>
 
   <style>
-    .player-container {
-      position: relative;
-      max-width: 800px;
+    /* Contenedor responsivo */
+    .player-box {
+      max-width: 900px;
       margin: 2rem auto;
+      background: #000;
       border-radius: 8px;
       overflow: hidden;
-      background-color: #000;
     }
 
-    /* Selector de calidad minimalista flotante */
-    .quality-selector {
+    /* Ubicar el grupo de controles arriba a la derecha */
+    .vds-controls-group.top-right {
       position: absolute;
       top: 12px;
       right: 12px;
       z-index: 10;
     }
-
-    .quality-btn {
-      background: rgba(0, 0, 0, 0.75);
-      color: #fff;
-      border: 1px solid rgba(255, 255, 255, 0.2);
-      padding: 6px 12px;
-      border-radius: 4px;
-      font-size: 13px;
-      cursor: pointer;
-      backdrop-filter: blur(4px);
-    }
-
-    .quality-items {
-      background: rgba(15, 15, 15, 0.95);
-      border: 1px solid rgba(255, 255, 255, 0.15);
-      border-radius: 4px;
-      padding: 4px;
-      color: #fff;
-      font-size: 13px;
-      display: flex;
-      flex-direction: column;
-      gap: 2px;
-    }
-
-    /* Elementos individuales del menú */
-    media-radio {
-      padding: 6px 10px;
-      cursor: pointer;
-      border-radius: 3px;
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-    }
-
-    media-radio[aria-checked="true"] {
-      background: rgba(255, 255, 255, 0.2);
-      font-weight: bold;
-    }
-
-    media-radio:hover {
-      background: rgba(255, 255, 255, 0.1);
-    }
   </style>
 </head>
 <body>
 
-  <div class="player-container">
+  <div class="player-box">
     <!-- 
-      - autoplay: inicia automáticamente si lo necesitas
-      - load="visible": Activa el Lazy Load (no descarga nada hasta que entra al viewport)
-      - src: Soporta YouTube ('youtube/VIDEO_ID'), Vimeo o HLS (.m3u8)
+      - load="visible": Estrategia de carga diferida oficial (Lazy load al entrar al viewport)
+      - src="youtube/ID": Provider oficial de YouTube con preconexiones automáticas
+      - aspect-ratio="16/9": Evita Cumulative Layout Shift (CLS)
     -->
     <media-player
       src="youtube/M7lc1UVf-VE"
@@ -84,17 +47,33 @@
     >
       <media-provider></media-provider>
 
-      <!-- ÚNICO CONTROL: Menú de Calidad -->
-      <media-menu class="quality-selector">
-        <media-menu-button class="quality-btn" aria-label="Calidad">
-          <span>Calidad</span>
-        </media-menu-button>
-        
-        <media-menu-items class="quality-items">
-          <!-- Este componente genera automáticamente las opciones (1080p, 720p, Auto, etc.) -->
-          <media-quality-radio-group></media-quality-radio-group>
-        </media-menu-items>
-      </media-menu>
+      <!-- Contenedor de controles oficial -->
+      <media-controls class="vds-controls">
+        <media-controls-group class="vds-controls-group top-right">
+          
+          <!-- Menú oficial de ajustes / calidad -->
+          <media-menu class="vds-menu">
+            
+            <media-menu-button class="vds-menu-button vds-button" aria-label="Calidad de video">
+              <media-icon class="vds-icon" type="settings"></media-icon>
+            </media-menu-button>
+
+            <media-menu-items class="vds-menu-items">
+              <media-quality-radio-group class="vds-radio-group">
+                <template>
+                  <media-radio class="vds-radio">
+                    <media-icon class="vds-icon" type="radio-check"></media-icon>
+                    <span class="vds-radio-label" data-part="label"></span>
+                    <span class="vds-badge" data-part="bitrate"></span>
+                  </media-radio>
+                </template>
+              </media-quality-radio-group>
+            </media-menu-items>
+
+          </media-menu>
+
+        </media-controls-group>
+      </media-controls>
     </media-player>
   </div>
 
