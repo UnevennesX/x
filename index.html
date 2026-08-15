@@ -5,9 +5,10 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Voice Eva Player</title>
 
-  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@vidstack/player@latest/styles/default/theme.css" />
-  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@vidstack/player@latest/styles/default/video.css" />
-  <script type="module" src="https://cdn.jsdelivr.net/npm/@vidstack/player@latest/cdn.js"></script>
+  <!-- CDN CORREGIDO: rutas actuales de Vidstack -->
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/vidstack@latest/styles/default/theme.css" />
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/vidstack@latest/styles/default/layouts/video.css" />
+  <script type="module" src="https://cdn.jsdelivr.net/npm/@vidstack/cdn@latest/player.js"></script>
 
   <style>
     :root {
@@ -74,7 +75,6 @@
       aspect-ratio: 16 / 9;
     }
 
-    /* Aviso opcional para invitar al usuario a tocar y activar sonido */
     #soundHint {
       position: absolute;
       bottom: 84px;
@@ -152,7 +152,6 @@
     let lastAppliedAutoplay = false;
     let endedReported = false;
     let soundUnlocked = false;
-    let startedMuted = false;
 
     function safePlay() {
       if (!player) return;
@@ -166,7 +165,6 @@
       try { window.parent.postMessage(message, '*'); } catch (e) {}
     }
 
-    // Desbloquea el sonido en la primera interacción real del usuario.
     function unlockSound() {
       if (soundUnlocked) return;
       soundUnlocked = true;
@@ -174,23 +172,18 @@
         player.muted = false;
         if (player.volume === 0) player.volume = 1;
       } catch (e) {}
-      // Nos aseguramos de que siga reproduciendo tras desmutear.
       safePlay();
       hideSoundHint();
       removeUnlockListeners();
     }
 
-    function showSoundHint() {
-      if (soundHint) soundHint.classList.add('show');
-    }
-    function hideSoundHint() {
-      if (soundHint) soundHint.classList.remove('show');
-    }
+    function showSoundHint() { if (soundHint) soundHint.classList.add('show'); }
+    function hideSoundHint() { if (soundHint) soundHint.classList.remove('show'); }
 
     function addUnlockListeners() {
-      window.addEventListener('pointerdown', unlockSound, { once: false, passive: true });
-      window.addEventListener('keydown', unlockSound, { once: false });
-      window.addEventListener('touchstart', unlockSound, { once: false, passive: true });
+      window.addEventListener('pointerdown', unlockSound, { passive: true });
+      window.addEventListener('keydown', unlockSound);
+      window.addEventListener('touchstart', unlockSound, { passive: true });
     }
     function removeUnlockListeners() {
       window.removeEventListener('pointerdown', unlockSound);
@@ -284,19 +277,14 @@
         postParent({ source: 'x-player', type: 'ready', videoId: lastAppliedVideoId || videoId || '' });
 
         if (lastAppliedAutoplay) {
-          // 1) Intentamos autoplay CON sonido (funciona si el navegador ya
-          //    tiene permiso: sitio visitado antes, PWA, etc.)
           try { player.muted = false; } catch (e) {}
           try {
             const p = player.play();
             if (p && typeof p.then === 'function') {
               p.then(() => {
-                // Autoplay con sonido permitido: no hace falta desbloquear.
                 soundUnlocked = true;
                 hideSoundHint();
               }).catch(() => {
-                // 2) Bloqueado: arrancamos MUTEADO y desbloqueamos al primer toque.
-                startedMuted = true;
                 try { player.muted = true; } catch (e) {}
                 safePlay();
                 showSoundHint();
@@ -304,7 +292,6 @@
               });
             }
           } catch (e) {
-            startedMuted = true;
             try { player.muted = true; } catch (e2) {}
             safePlay();
             showSoundHint();
@@ -336,7 +323,6 @@
 
     window.addEventListener('message', handleParentMessage, false);
 
-    // Carga inicial: por parámetro ?v=  o el video demo por defecto.
     if (videoId) {
       applyVideo(videoId, autoplay, { seekTime: startTime || 0, forceReload: true });
     } else {
