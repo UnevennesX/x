@@ -4,9 +4,10 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="referrer" content="strict-origin-when-cross-origin">
-    <title>Reproductor Externo</title>
+    <title>Reproductor Externo - Lite YouTube</title>
 
-    <script type="module" src="https://cdn.jsdelivr.net/npm/@justinribeiro/lite-youtube@1.5.0/lite-youtube.js"></script>
+    <!-- Versión oficial recomendada en el README -->
+    <script type="module" src="https://cdn.jsdelivr.net/npm/@justinribeiro/lite-youtube@1/lite-youtube.min.js"></script>
 
     <style>
         * { box-sizing: border-box; }
@@ -26,28 +27,27 @@
             position: relative;
             width: 100%;
             height: 100%;
-            max-width: 100%;
-            max-height: 100%;
-            display: flex;
-            align-items: center;
-            justify-content: center;
         }
 
-        /* Video al 100% sin recortes ni zoom */
+        /* 1. Configuración del componente según la documentación */
         lite-youtube {
+            position: absolute;
+            top: 0;
+            left: 0;
             width: 100% !important;
             height: 100% !important;
             max-width: 100% !important;
             background-color: #000;
-            --lite-youtube-frame-shadow-visible: none;
+            /* Valor oficial del README para eliminar el marco/sombra */
+            --lite-youtube-frame-shadow-visible: no; 
         }
 
-        /* Ocultar botón de play inicial */
+        /* 2. Ocultar el botón Play usando el Shadow DOM Part oficial */
         lite-youtube::part(playButton) {
             display: none !important;
         }
 
-        /* Bloquear hover para que YouTube oculte el botón de compartir automáticamente */
+        /* 3. Bloqueo de interacción con el iframe para que los botones de YouTube se oculten solos */
         #playerHost iframe {
             position: absolute;
             top: 0;
@@ -55,7 +55,7 @@
             width: 100%;
             height: 100%;
             border: 0;
-            pointer-events: none; /* YouTube no detecta el mouse y oculta su interfaz */
+            pointer-events: none;
         }
     </style>
 </head>
@@ -236,11 +236,16 @@
             liteElement = document.createElement('lite-youtube');
             liteElement.setAttribute('videoid', vid || '');
             
+            // Atributo oficial para privacidad y carga limpia
+            liteElement.setAttribute('nocookie', '');
+            
+            // Parámetros sin controles según el README
             var origin = encodeURIComponent(location.origin || '');
             var p = 'enablejsapi=1&origin=' + origin + '&rel=0&modestbranding=1&playsinline=1&iv_load_policy=3&controls=0&fs=0&disablekb=1';
             if (ap) { p += '&autoplay=1&mute=1'; }
             liteElement.setAttribute('params', p);
 
+            // Evento oficial del ciclo de vida documentado en el README
             liteElement.addEventListener('liteYoutubeIframeLoaded', function () {
                 attachPlayerFromLite();
             });
@@ -293,7 +298,7 @@
                             stopKickWatchdog();
                         }
                         
-                        // Si el video termina, lo pausamos en el segundo final para evitar la cuadrícula de videos sugeridos
+                        // Si finaliza, pausamos en el segundo final para evitar recomendaciones
                         if (s === YT.PlayerState.ENDED) {
                             try {
                                 player.seekTo(player.getDuration(), true);
@@ -357,6 +362,7 @@
         }
     }, false);
 
+    // Carga de la API base de YouTube Iframe
     var tag = document.createElement('script');
     tag.src = 'https://www.youtube.com/iframe_api';
     document.head.appendChild(tag);
