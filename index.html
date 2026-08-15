@@ -4,61 +4,38 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Voice Eva Player</title>
+  <link rel="icon" href="data:," />
 
-  <!-- CDN CORREGIDO: rutas actuales de Vidstack -->
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/vidstack@latest/styles/default/theme.css" />
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/vidstack@latest/styles/default/layouts/video.css" />
   <script type="module" src="https://cdn.jsdelivr.net/npm/@vidstack/cdn@latest/player.js"></script>
 
   <style>
-    :root {
-      --bg: #000;
-      --panel: #0f0f10;
-      --text: #fff;
-    }
-
+    :root { --bg: #000; --text: #fff; }
     * { box-sizing: border-box; }
     html, body {
-      margin: 0;
-      width: 100%;
-      height: 100%;
-      background: var(--bg);
-      color: var(--text);
+      margin: 0; width: 100%; height: 100%;
+      background: var(--bg); color: var(--text);
       font-family: Arial, Helvetica, sans-serif;
       overflow: hidden;
     }
-
     body {
-      display: grid;
-      place-items: center;
+      display: grid; place-items: center;
       background: radial-gradient(circle at top, rgba(255,255,255,0.08), transparent 30%), #000;
     }
-
     #playerHost {
-      width: 100vw;
-      height: 100vh;
-      background: #000;
-      position: relative;
-      display: grid;
-      place-items: center;
-      overflow: hidden;
+      width: 100vw; height: 100vh; background: #000;
+      position: relative; display: grid; place-items: center; overflow: hidden;
     }
-
-    media-player,
-    media-player > * {
-      width: 100% !important;
-      height: 100% !important;
-      max-width: none !important;
-      max-height: none !important;
-      display: block;
-      background: #000;
+    media-player, media-player > * {
+      width: 100% !important; height: 100% !important;
+      max-width: none !important; max-height: none !important;
+      display: block; background: #000;
     }
-
     media-player {
       width: min(100vw, calc(100vh * 16 / 9));
       height: min(100vh, calc(100vw * 9 / 16));
-      max-width: 100vw;
-      max-height: 100vh;
+      max-width: 100vw; max-height: 100vh;
       --media-brand: hsl(0,0%,96%);
       --media-focus-ring: rgba(255,255,255,0.3);
       --media-controls-color: #fff;
@@ -70,26 +47,14 @@
       --media-button-bg: rgba(255,255,255,0.06);
       --media-button-hover-bg: rgba(255,255,255,0.12);
     }
-
-    .media-player[data-view-type='video'] {
-      aspect-ratio: 16 / 9;
-    }
+    .media-player[data-view-type='video'] { aspect-ratio: 16 / 9; }
 
     #soundHint {
-      position: absolute;
-      bottom: 84px;
-      left: 50%;
-      transform: translateX(-50%);
-      padding: 8px 16px;
-      background: rgba(0,0,0,0.65);
-      border: 1px solid rgba(255,255,255,0.2);
-      border-radius: 999px;
-      font-size: 14px;
-      color: #fff;
-      z-index: 50;
-      pointer-events: none;
-      opacity: 0;
-      transition: opacity .25s ease;
+      position: absolute; bottom: 84px; left: 50%; transform: translateX(-50%);
+      padding: 8px 16px; background: rgba(0,0,0,0.65);
+      border: 1px solid rgba(255,255,255,0.2); border-radius: 999px;
+      font-size: 14px; color: #fff; z-index: 50; pointer-events: none;
+      opacity: 0; transition: opacity .25s ease;
     }
     #soundHint.show { opacity: 1; }
   </style>
@@ -105,36 +70,10 @@
       crossorigin
       playsinline
       title="Voice Eva"
-      poster="https://files.vidstack.io/sprite-fight/poster.webp"
       style="width:100%;height:100%;"
     >
-      <media-provider>
-        <media-poster class="vds-poster"></media-poster>
-
-        <track
-          src="https://files.vidstack.io/sprite-fight/subs/english.vtt"
-          kind="subtitles"
-          srclang="en-US"
-          label="English"
-          default
-        />
-        <track
-          src="https://files.vidstack.io/sprite-fight/subs/spanish.vtt"
-          kind="subtitles"
-          srclang="es-ES"
-          label="Spanish"
-        />
-        <track
-          src="https://files.vidstack.io/sprite-fight/chapters.vtt"
-          kind="chapters"
-          srclang="en-US"
-          default
-        />
-      </media-provider>
-
-      <media-video-layout
-        thumbnails="https://files.vidstack.io/sprite-fight/thumbnails.vtt"
-      ></media-video-layout>
+      <media-provider></media-provider>
+      <media-video-layout></media-video-layout>
     </media-player>
 
     <div id="soundHint">Toca para activar el sonido</div>
@@ -323,10 +262,9 @@
 
     window.addEventListener('message', handleParentMessage, false);
 
+    // Solo carga si viene ?v= en la URL (sin video por defecto)
     if (videoId) {
       applyVideo(videoId, autoplay, { seekTime: startTime || 0, forceReload: true });
-    } else {
-      applyVideo('_cMxraX_5RE', autoplay, { seekTime: startTime || 0, forceReload: true });
     }
   </script>
 </body>
