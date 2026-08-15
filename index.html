@@ -1,1 +1,102 @@
-<script type="module" src="https://cdn.jsdelivr.net/npm/@justinribeiro/lite-youtube@1/lite-youtube.min.js"></script><style>lite-youtube{--lite-youtube-frame-shadow-visible:no}lite-youtube::part(playButton){display:none}</style><lite-youtube videoid="guJLfqTFfIw" params="controls=0&rel=0&iv_load_policy=3&disablekb=1&fs=0" nocookie></lite-youtube>
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <title>Vidstack - Solo Calidad</title>
+  
+  <!-- CDN de Vidstack Elements -->
+  <link rel="stylesheet" href="https://cdn.vidstack.io/player/theme.css" />
+  <script type="module" src="https://cdn.vidstack.io/player"></script>
+
+  <style>
+    .player-container {
+      position: relative;
+      max-width: 800px;
+      margin: 2rem auto;
+      border-radius: 8px;
+      overflow: hidden;
+      background-color: #000;
+    }
+
+    /* Selector de calidad minimalista flotante */
+    .quality-selector {
+      position: absolute;
+      top: 12px;
+      right: 12px;
+      z-index: 10;
+    }
+
+    .quality-btn {
+      background: rgba(0, 0, 0, 0.75);
+      color: #fff;
+      border: 1px solid rgba(255, 255, 255, 0.2);
+      padding: 6px 12px;
+      border-radius: 4px;
+      font-size: 13px;
+      cursor: pointer;
+      backdrop-filter: blur(4px);
+    }
+
+    .quality-items {
+      background: rgba(15, 15, 15, 0.95);
+      border: 1px solid rgba(255, 255, 255, 0.15);
+      border-radius: 4px;
+      padding: 4px;
+      color: #fff;
+      font-size: 13px;
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+    }
+
+    /* Elementos individuales del menú */
+    media-radio {
+      padding: 6px 10px;
+      cursor: pointer;
+      border-radius: 3px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    media-radio[aria-checked="true"] {
+      background: rgba(255, 255, 255, 0.2);
+      font-weight: bold;
+    }
+
+    media-radio:hover {
+      background: rgba(255, 255, 255, 0.1);
+    }
+  </style>
+</head>
+<body>
+
+  <div class="player-container">
+    <!-- 
+      - autoplay: inicia automáticamente si lo necesitas
+      - load="visible": Activa el Lazy Load (no descarga nada hasta que entra al viewport)
+      - src: Soporta YouTube ('youtube/VIDEO_ID'), Vimeo o HLS (.m3u8)
+    -->
+    <media-player
+      src="youtube/M7lc1UVf-VE"
+      load="visible"
+      aspect-ratio="16/9"
+    >
+      <media-provider></media-provider>
+
+      <!-- ÚNICO CONTROL: Menú de Calidad -->
+      <media-menu class="quality-selector">
+        <media-menu-button class="quality-btn" aria-label="Calidad">
+          <span>Calidad</span>
+        </media-menu-button>
+        
+        <media-menu-items class="quality-items">
+          <!-- Este componente genera automáticamente las opciones (1080p, 720p, Auto, etc.) -->
+          <media-quality-radio-group></media-quality-radio-group>
+        </media-menu-items>
+      </media-menu>
+    </media-player>
+  </div>
+
+</body>
+</html>
