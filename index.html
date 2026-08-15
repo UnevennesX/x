@@ -95,15 +95,40 @@
     const autoplay = params.get('autoplay') === '1';
     const startTime = Number(params.get('t') || 0);
     const player = document.getElementById('player');
+    let lastAppliedVideoId = null;
+    let lastAppliedAutoplay = false;
+    let endedReported = false;
 
     function postParent(message) {
       try { window.parent.postMessage(message, '*'); } catch (e) {}
     }
 
-    function applyVideo(id, shouldAutoplay) {
+    function applyVideo(id, shouldAutoplay, options = {}) {
       if (!player || !id) return;
-      player.src = `youtube/${id}`;
-      player.setAttribute('title', id);
+      const nextId = String(id);
+      const forceReload = !!options.forceReload;
+      const sameVideo = lastAppliedVideoId === nextId && !forceReload;
+      endedReported = false;
+
+      if (sameVideo) {
+        if (Number.isFinite(options.seekTime)) {
+          try { player.currentTime = Number(options.seekTime); } catch (e) {}
+        }
+        if (shouldAutoplay !== lastAppliedAutoplay) {
+          lastAppliedAutoplay = !!shouldAutoplay;
+          if (shouldAutoplay) {
+            try { player.play(); } catch (e) {}
+          } else {
+            try { player.pause(); } catch (e) {}
+          }
+        }
+        return;
+      }
+
+      lastAppliedVideoId = nextId;
+      lastAppliedAutoplay = !!shouldAutoplay;
+      player.src = `youtube/${nextId}`;
+      player.setAttribute('title', nextId);
       if (shouldAutoplay) {
         player.setAttribute('autoplay', '');
       } else {
@@ -112,10 +137,14 @@
 
       setTimeout(() => {
         try {
-          if (shouldAutoplay) player.play();
-          if (Number.isFinite(startTime) && startTime > 0) player.currentTime = startTime;
+          if (Number.isFinite(options.seekTime) && options.seekTime > 0) {
+            player.currentTime = Number(options.seekTime);
+          }
+          if (shouldAutoplay) {
+            player.play();
+          }
         } catch (e) {}
-      }, 400);
+      }, 350);
     }
 
     function handleParentMessage(event) {
@@ -124,13 +153,13 @@
 
       switch (data.type) {
         case 'load':
-          if (data.videoId) applyVideo(data.videoId, !!data.autoplay);
+          if (data.videoId) applyVideo(data.videoId, !!data.autoplay, { seekTime: Number(data.time) || 0, forceReload: true });
           break;
         case 'play':
-          try { player.play(); } catch (e) {}
+          try { if (player.paused) player.play(); } catch (e) {}
           break;
         case 'pause':
-          try { player.pause(); } catch (e) {}
+          try { if (!player.paused) player.pause(); } catch (e) {}
           break;
         case 'seek':
           if (Number.isFinite(Number(data.time))) {
@@ -138,7 +167,7 @@
           }
           break;
         case 'stop':
-          try { player.pause(); player.currentTime = 0; } catch (e) {}
+          try { player.pause(); player.currentTime = 0; endedReported = false; } catch (e) {}
           break;
         case 'mute':
           try { player.muted = true; } catch (e) {}
@@ -156,26 +185,34 @@
 
     if (player) {
       player.addEventListener('can-play', () => {
-        postParent({ source: 'x-player', type: 'ready', videoId: videoId || '' });
+        postParent({ source: 'x-player', type: 'ready', videoId: lastAppliedVideoId || videoId || '' });
       });
 
       player.addEventListener('time-update', () => {
-        postParent({ source: 'x-player', type: 'time-update', videoId: videoId || '', time: player.currentTime || 0, duration: player.duration || 0 });
+        const now = Number(player.currentTime) || 0;
+        postParent({ source: 'x-player', type: 'time-update', videoId: lastAppliedVideoId || videoId || '', time: now, duration: Number(player.duration) || 0 });
       });
 
       player.addEventListener('play', () => {
-        postParent({ source: 'x-player', type: 'state', state: 'playing', videoId: videoId || '', time: player.currentTime || 0 });
+        endedReported = false;
+        postParent({ source: 'x-player', type: 'state', state: 'playing', videoId: lastAppliedVideoId || videoId || '', time: Number(player.currentTime) || 0 });
       });
 
       player.addEventListener('pause', () => {
-        postParent({ source: 'x-player', type: 'state', state: 'paused', videoId: videoId || '', time: player.currentTime || 0 });
+        postParent({ source: 'x-player', type: 'state', state: 'paused', videoId: lastAppliedVideoId || videoId || '', time: Number(player.currentTime) || 0 });
+      });
+
+      player.addEventListener('ended', () => {
+        if (endedReported) return;
+        endedReported = true;
+        postParent({ source: 'x-player', type: 'ended', videoId: lastAppliedVideoId || videoId || '', time: Number(player.currentTime) || 0 });
       });
     }
 
     window.addEventListener('message', handleParentMessage, false);
 
     if (videoId) {
-      applyVideo(videoId, autoplay);
+      applyVideo(videoId, autoplay, { seekTime: startTime || 0, forceReload: true });
     }
   </script>
 </body>
