@@ -3,11 +3,9 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <!-- Referer nativo para YouTube: evita Error 153 -->
     <meta name="referrer" content="strict-origin-when-cross-origin">
     <title>Reproductor Externo</title>
 
-    <!-- Componente lite-youtube oficial de Justin Ribeiro -->
     <script type="module" src="https://cdn.jsdelivr.net/npm/@justinribeiro/lite-youtube@1.5.0/lite-youtube.js"></script>
 
     <style>
@@ -19,32 +17,37 @@
             height: 100%;
             overflow: hidden;
             background: #000;
-        }
-        #playerHost {
-            position: absolute;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
         }
 
-        /* 1. Ajuste de lite-youtube y eliminación de sombras */
+        #playerHost {
+            position: relative;
+            width: 100%;
+            height: 100%;
+            max-width: 100%;
+            max-height: 100%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        /* Video al 100% sin recortes ni zoom */
         lite-youtube {
-            position: absolute;
-            top: 0;
-            left: 0;
             width: 100% !important;
             height: 100% !important;
             max-width: 100% !important;
             background-color: #000;
-            --lite-youtube-frame-shadow-visible: none; /* Quita el degradado del marco */
+            --lite-youtube-frame-shadow-visible: none;
         }
 
-        /* 2. Ocultar el botón rojo de Play inicial */
+        /* Ocultar botón de play inicial */
         lite-youtube::part(playButton) {
             display: none !important;
         }
 
+        /* Bloquear hover para que YouTube oculte el botón de compartir automáticamente */
         #playerHost iframe {
             position: absolute;
             top: 0;
@@ -52,18 +55,19 @@
             width: 100%;
             height: 100%;
             border: 0;
+            pointer-events: none; /* YouTube no detecta el mouse y oculta su interfaz */
         }
     </style>
 </head>
 <body>
 <div id="playerHost"></div>
+
 <script>
 (function () {
     'use strict';
 
     var player = null;
     var playerReady = false;
-    var ytReady = false;
     var currentVideo = null;
     var pendingCmds = [];
     var suppressNotifyUntil = 0;
@@ -232,13 +236,11 @@
             liteElement = document.createElement('lite-youtube');
             liteElement.setAttribute('videoid', vid || '');
             
-            // 3. Configuración para eliminar todos los controles (controls=0, fs=0, disablekb=1)
             var origin = encodeURIComponent(location.origin || '');
             var p = 'enablejsapi=1&origin=' + origin + '&rel=0&modestbranding=1&playsinline=1&iv_load_policy=3&controls=0&fs=0&disablekb=1';
             if (ap) { p += '&autoplay=1&mute=1'; }
             liteElement.setAttribute('params', p);
 
-            // Escuchar cuando el componente inserte el iframe para conectar YT.Player
             liteElement.addEventListener('liteYoutubeIframeLoaded', function () {
                 attachPlayerFromLite();
             });
@@ -290,20 +292,22 @@
                             }
                             stopKickWatchdog();
                         }
+                        
+                        // Si el video termina, lo pausamos en el segundo final para evitar la cuadrícula de videos sugeridos
+                        if (s === YT.PlayerState.ENDED) {
+                            try {
+                                player.seekTo(player.getDuration(), true);
+                                player.pauseVideo();
+                            } catch (err) {}
+                            notify({ cmd: 'ended', videoId: currentVideo });
+                            return;
+                        }
+
                         if (Date.now() < suppressNotifyUntil) return;
                         if (s === YT.PlayerState.PLAYING) notify({ cmd: 'state', isPlaying: true, videoId: currentVideo, time: safeTime() });
                         else if (s === YT.PlayerState.PAUSED) notify({ cmd: 'state', isPlaying: false, videoId: currentVideo, time: safeTime() });
-                        else if (s === YT.PlayerState.ENDED) notify({ cmd: 'ended', videoId: currentVideo });
                     },
-                    onError: function (e) { notify({ cmd: 'error', code: e && e.data, videoId: currentVideo }); },
-                    onAutoplayBlocked: function () {
-                        mutedStart = true;
-                        try {
-                            player.mute();
-                            player.playVideo();
-                        } catch (e) {}
-                        notify({ cmd: 'autoplay_blocked', videoId: currentVideo });
-                    }
+                    onError: function (e) { notify({ cmd: 'error', code: e && e.data, videoId: currentVideo }); }
                 }
             });
         }
@@ -321,7 +325,6 @@
     }
 
     window.onYouTubeIframeAPIReady = function () {
-        ytReady = true;
         var autoplayWanted = getAutoplay();
         var initialVid = getVideoId();
 
@@ -354,7 +357,6 @@
         }
     }, false);
 
-    // Carga de la API base de YouTube Iframe
     var tag = document.createElement('script');
     tag.src = 'https://www.youtube.com/iframe_api';
     document.head.appendChild(tag);
