@@ -31,7 +31,19 @@
       background: #000;
     }
 
-    /* El iframe nativo llena el 100% */
+    /* El reproductor empieza oculto para que no se vea el pause/buffer inicial */
+    #playerContainer {
+      width: 100%;
+      height: 100%;
+      opacity: 0;
+      transition: opacity 0.35s cubic-bezier(0.4, 0, 0.2, 1);
+    }
+
+    /* Se hace visible solo cuando ya está reproduciendo */
+    #playerContainer.ready-playing {
+      opacity: 1;
+    }
+
     #player, iframe {
       width: 100% !important;
       height: 100% !important;
@@ -39,29 +51,31 @@
       display: block;
     }
 
-    /* Aviso cuando el autoplay inicia muteado */
+    /* Cartel flotante para activar el sonido */
     #soundHint {
       position: absolute;
       bottom: 80px;
       left: 50%;
       transform: translateX(-50%);
-      padding: 10px 20px;
-      background: rgba(0, 0, 0, 0.85);
+      padding: 10px 22px;
+      background: rgba(15, 15, 15, 0.85);
       border: 1px solid rgba(255, 255, 255, 0.25);
       border-radius: 999px;
       font-size: 14px;
+      font-weight: 500;
       color: #fff;
       z-index: 50;
       pointer-events: none;
       opacity: 0;
-      transition: opacity 0.25s ease;
-      box-shadow: 0 4px 12px rgba(0,0,0,0.5);
+      transition: opacity 0.3s ease, transform 0.3s ease;
+      backdrop-filter: blur(8px);
+      box-shadow: 0 4px 16px rgba(0,0,0,0.6);
     }
     #soundHint.show {
       opacity: 1;
+      transform: translateX(-50%) translateY(0);
     }
 
-    /* Mensaje si falta ?v= */
     #msg {
       position: absolute;
       inset: 0;
@@ -80,22 +94,26 @@
 
 <body>
   <div id="stage">
-    <div id="player"></div>
-    <div id="soundHint">🔊 Toca la pantalla para activar el sonido</div>
+    <div id="playerContainer">
+      <div id="player"></div>
+    </div>
+
+    <div id="soundHint">🔊 Toca para activar el sonido</div>
     <div id="msg">
       Falta el parámetro <code>?v=VIDEO_ID</code> en la URL.
     </div>
   </div>
 
-  <!-- API oficial de Iframe de YouTube -->
   <script src="https://www.youtube.com/iframe_api"></script>
 
   <script>
     const params = new URLSearchParams(window.location.search);
     const initialVideoId = (params.get("v") || "").trim();
-    const initialAutoplay = params.get("autoplay") === "1";
+    // Por defecto autoplay activado si no se especifica lo contrario
+    const initialAutoplay = params.get("autoplay") !== "0"; 
     const initialTime = Math.max(0, Number(params.get("t")) || 0);
 
+    const playerContainer = document.getElementById("playerContainer");
     const soundHint = document.getElementById("soundHint");
     const msg = document.getElementById("msg");
 
@@ -163,7 +181,6 @@
       }
     }
 
-    // Callback obligatorio de YouTube al cargar la API
     window.onYouTubeIframeAPIReady = function() {
       isApiReady = true;
       if (initialVideoId) {
@@ -177,8 +194,9 @@
       player = new YT.Player("player", {
         videoId: videoId,
         playerVars: {
-          autoplay: wantsAutoplay ? 1 : 0,
-          controls: 1, // Controles nativos de YouTube (engranaje, calidad, etc.)
+          autoplay: 1,      // Siempre fuerza autoplay
+          mute: 1,          // CLAVE: Arranca muteado para que el navegador NUNCA lo pause
+          controls: 1,      // Menú nativo con selector de calidad
           rel: 0,
           modestbranding: 1,
           playsinline: 1,
@@ -194,25 +212,35 @@
 
             post({ type: "ready", videoId: currentVideoId });
 
-            if (wantsAutoplay) {
-              try {
-                event.target.playVideo();
-                soundUnlocked = true;
-              } catch {
-                try {
-                  event.target.mute();
-                  event.target.playVideo();
-                  showHint();
-                  armUnlockOnFirstInteraction();
-                } catch {}
-              }
+            // Forzar inicio inmediato
+            try {
+              event.target.playVideo();
+            } catch {}
+
+            // Intentar desmutear; si el navegador lo permite lo deja con audio, si no, espera al primer clic
+            try {
+              event.target.unMute();
+              soundUnlocked = true;
+            } catch {
+              showHint();
+              armUnlockOnFirstInteraction();
             }
           },
           onStateChange: (event) => {
-            // YT.PlayerState: UNSTARTED (-1), ENDED (0), PLAYING (1), PAUSED (2), BUFFERING (3), CUED (5)
             if (event.data === YT.PlayerState.PLAYING) {
               endedReported = false;
+              // Revelar el video suavemente solo cuando ya está rodando
+              playerContainer.classList.add("ready-playing");
               startTimeTracker();
+
+              // Si está silenciado, mostramos el aviso para activar sonido
+              if (player.isMuted && player.isMuted()) {
+                showHint();
+                armUnlockOnFirstInteraction();
+              } else {
+                hideHint();
+              }
+
               post({
                 type: "state",
                 state: "playing",
@@ -240,11 +268,12 @@
             }
           },
           onError: (event) => {
+            playerContainer.classList.add("ready-playing");
             post({
               type: "error",
               videoId: currentVideoId,
               code: event.data,
-              message: "Error al reproducir el video de YouTube."
+              message: "Error al reproducir el video."
             });
           }
         }
@@ -257,28 +286,22 @@
       wantsAutoplay = !!autoplay;
       pendingSeek = Math.max(0, Number(time) || 0);
       endedReported = false;
-      soundUnlocked = false;
 
       if (!isApiReady) return;
 
       if (!player) {
         createPlayer(currentVideoId);
       } else {
-        if (wantsAutoplay) {
-          player.loadVideoById({
-            videoId: currentVideoId,
-            startSeconds: pendingSeek
-          });
-        } else {
-          player.cueVideoById({
-            videoId: currentVideoId,
-            startSeconds: pendingSeek
-          });
-        }
+        // Al cambiar de video, ocultamos un momento hasta que arranque el nuevo
+        playerContainer.classList.remove("ready-playing");
+        player.loadVideoById({
+          videoId: currentVideoId,
+          startSeconds: pendingSeek
+        });
       }
     }
 
-    // Receptor de comandos por postMessage desde la app padre
+    // Receptor de mensajes del padre
     window.addEventListener("message", (event) => {
       const data = event?.data;
       if (!data || data.source !== "voice-eva" || !player) return;
