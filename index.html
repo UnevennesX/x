@@ -11,11 +11,23 @@
 <body>
     <div id="playerHost" style="max-width:860px;margin:auto;">
         <media-player
-            src="youtube/{{ video_id }}"
+            src=""
             load="visible"
             aspect-ratio="16/9"
             playsinline
         >
+        <script>
+          const params = new URLSearchParams(window.location.search);
+          const videoId = params.get('v');
+          const autoplay = params.get('autoplay');
+          if (videoId) {
+            const player = document.querySelector('media-player');
+            if (player) {
+              player.setAttribute('src', `youtube/${videoId}`);
+              if (autoplay === '1') player.setAttribute('autoplay', '');
+            }
+          }
+        </script>
             <media-provider></media-provider>
             <media-controls class="vds-controls">
                 <media-controls-group class="vds-controls-group top-right">
