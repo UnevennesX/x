@@ -2,76 +2,70 @@
 <html lang="es">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta
+    name="viewport"
+    content="width=device-width, initial-scale=1, viewport-fit=cover"
+  />
+
   <title>Voice Eva Player</title>
   <link rel="icon" href="data:," />
 
-  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/vidstack@latest/styles/default/theme.css" />
-  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/vidstack@latest/styles/default/layouts/video.css" />
-  <script type="module" src="https://cdn.jsdelivr.net/npm/@vidstack/cdn@latest/player.js"></script>
+  <!-- Vidstack Web Components -->
+  <script
+    type="module"
+    src="https://cdn.jsdelivr.net/npm/@vidstack/cdn@latest/player.js"
+  ></script>
 
   <style>
-    :root { --bg: #000; --text: #fff; }
-    * { box-sizing: border-box; }
-    html, body {
-      margin: 0; padding: 0;
-      width: 100%; height: 100%;
-      background: var(--bg); color: var(--text);
-      font-family: Arial, Helvetica, sans-serif;
+    * {
+      box-sizing: border-box;
+    }
+
+    html,
+    body,
+    #playerHost,
+    media-player,
+    media-provider {
+      width: 100%;
+      height: 100%;
+      margin: 0;
+      padding: 0;
+    }
+
+    html,
+    body {
       overflow: hidden;
+      background: #000;
     }
 
     #playerHost {
-      position: fixed; inset: 0;
-      width: 100vw; height: 100vh;
+      position: fixed;
+      inset: 0;
       background: #000;
     }
 
-    /* El reproductor ocupa TODO el contenedor, sin proporción forzada */
-    media-player {
-      width: 100% !important;
-      height: 100% !important;
+    media-player,
+    media-provider {
+      display: block;
       max-width: none !important;
       max-height: none !important;
-      display: block;
       background: #000;
-      --media-brand: hsl(0,0%,96%);
-      --media-focus-ring: rgba(255,255,255,0.3);
-      --media-controls-color: #fff;
-      --media-controls-background: rgba(0,0,0,0.5);
-      --media-menu-item-hover-bg: rgba(255,255,255,0.08);
-      --media-slider-track-bg: rgba(255,255,255,0.20);
-      --media-slider-fill-bg: rgba(255,255,255,0.90);
-      --media-slider-thumb-bg: #fff;
-      --media-button-bg: rgba(255,255,255,0.06);
-      --media-button-hover-bg: rgba(255,255,255,0.12);
     }
 
-    media-provider,
-    media-provider > * {
+    /*
+     * El proveedor de YouTube utiliza un iframe.
+     * Estas reglas intentan cubrir completamente el contenedor.
+     */
+    media-provider iframe,
+    media-provider video {
       width: 100% !important;
       height: 100% !important;
-    }
-
-    /* Rellena toda la pantalla. 'cover' recorta bordes para llenar sin franjas.
-       Cambia a 'contain' si prefieres ver el video completo con franjas negras. */
-    media-provider video,
-    media-provider iframe {
-      width: 100% !important;
-      height: 100% !important;
+      border: 0 !important;
       object-fit: cover !important;
     }
-
-    #soundHint {
-      position: absolute; bottom: 84px; left: 50%; transform: translateX(-50%);
-      padding: 8px 16px; background: rgba(0,0,0,0.65);
-      border: 1px solid rgba(255,255,255,0.2); border-radius: 999px;
-      font-size: 14px; color: #fff; z-index: 50; pointer-events: none;
-      opacity: 0; transition: opacity .25s ease;
-    }
-    #soundHint.show { opacity: 1; }
   </style>
 </head>
+
 <body>
   <div id="playerHost">
     <media-player
@@ -83,198 +77,230 @@
       playsinline
       title="Voice Eva"
     >
+      <!-- Sin media-video-layout: no hay interfaz ni controles -->
       <media-provider></media-provider>
-      <media-video-layout></media-video-layout>
     </media-player>
-
-    <div id="soundHint">Toca para activar el sonido</div>
   </div>
 
   <script>
     const params = new URLSearchParams(window.location.search);
-    const videoId = params.get('v');
-    const autoplay = params.get('autoplay') === '1';
-    const startTime = Number(params.get('t') || 0);
-    const player = document.getElementById('player');
-    const soundHint = document.getElementById('soundHint');
 
-    let lastAppliedVideoId = null;
-    let lastAppliedAutoplay = false;
+    const initialVideoId = params.get("v");
+    const initialAutoplay = params.get("autoplay") === "1";
+    const initialTime = Math.max(0, Number(params.get("t")) || 0);
+
+    const player = document.getElementById("player");
+
+    let currentVideoId = "";
+    let shouldAutoplay = false;
+    let pendingTime = 0;
     let endedReported = false;
-    let soundUnlocked = false;
-
-    function safePlay() {
-      if (!player) return;
-      try {
-        const p = player.play();
-        if (p && typeof p.catch === 'function') p.catch(() => {});
-      } catch (e) {}
-    }
 
     function postParent(message) {
-      try { window.parent.postMessage(message, '*'); } catch (e) {}
-    }
-
-    function unlockSound() {
-      if (soundUnlocked) return;
-      soundUnlocked = true;
       try {
-        player.muted = false;
-        if (player.volume === 0) player.volume = 1;
-      } catch (e) {}
-      safePlay();
-      hideSoundHint();
-      removeUnlockListeners();
+        window.parent.postMessage(message, "*");
+      } catch {}
     }
 
-    function showSoundHint() { if (soundHint) soundHint.classList.add('show'); }
-    function hideSoundHint() { if (soundHint) soundHint.classList.remove('show'); }
+    function playSafely() {
+      if (!player) return;
 
-    function addUnlockListeners() {
-      window.addEventListener('pointerdown', unlockSound, { passive: true });
-      window.addEventListener('keydown', unlockSound);
-      window.addEventListener('touchstart', unlockSound, { passive: true });
-    }
-    function removeUnlockListeners() {
-      window.removeEventListener('pointerdown', unlockSound);
-      window.removeEventListener('keydown', unlockSound);
-      window.removeEventListener('touchstart', unlockSound);
+      try {
+        const promise = player.play();
+
+        if (promise?.catch) {
+          promise.catch(() => {
+            /*
+             * Los navegadores pueden bloquear el autoplay con sonido.
+             * No se activa mute automáticamente porque se solicitó sin mute.
+             */
+            postParent({
+              source: "x-player",
+              type: "autoplay-blocked",
+              videoId: currentVideoId
+            });
+          });
+        }
+      } catch {}
     }
 
-    function applyVideo(id, shouldAutoplay, options = {}) {
-      if (!player || !id) return;
-      const nextId = String(id);
-      const forceReload = !!options.forceReload;
-      const sameVideo = lastAppliedVideoId === nextId && !forceReload;
+    function seek(time) {
+      const value = Number(time);
+
+      if (!Number.isFinite(value) || value < 0) return;
+
+      try {
+        player.currentTime = value;
+      } catch {}
+    }
+
+    function loadVideo(videoId, autoplay = false, time = 0) {
+      if (!player || !videoId) return;
+
+      currentVideoId = String(videoId).trim();
+      shouldAutoplay = Boolean(autoplay);
+      pendingTime = Math.max(0, Number(time) || 0);
       endedReported = false;
 
-      if (sameVideo) {
-        if (Number.isFinite(options.seekTime)) {
-          try { player.currentTime = Number(options.seekTime); } catch (e) {}
-        }
-        if (shouldAutoplay !== lastAppliedAutoplay) {
-          lastAppliedAutoplay = !!shouldAutoplay;
-          if (shouldAutoplay) {
-            if (player.readyState >= 1) safePlay();
-          } else {
-            try { player.pause(); } catch (e) {}
-          }
-        }
-        return;
-      }
+      /*
+       * Formato oficial del proveedor YouTube de Vidstack.
+       */
+      player.src = `youtube/${currentVideoId}`;
+      player.title = currentVideoId;
 
-      lastAppliedVideoId = nextId;
-      lastAppliedAutoplay = !!shouldAutoplay;
-      player.src = `youtube/${nextId}`;
-      player.setAttribute('title', nextId);
+      /*
+       * No se usa muted. El navegador decidirá si permite
+       * autoplay con sonido.
+       */
+      player.muted = false;
 
       if (shouldAutoplay) {
-        player.setAttribute('autoplay', '');
+        player.setAttribute("autoplay", "");
       } else {
-        player.removeAttribute('autoplay');
+        player.removeAttribute("autoplay");
       }
-
-      setTimeout(() => {
-        try {
-          if (Number.isFinite(options.seekTime) && options.seekTime > 0) {
-            player.currentTime = Number(options.seekTime);
-          }
-          if (shouldAutoplay && player.readyState >= 1) {
-            safePlay();
-          }
-        } catch (e) {}
-      }, 350);
     }
 
     function handleParentMessage(event) {
-      const data = event && event.data;
-      if (!data || data.source !== 'voice-eva') return;
+      const data = event?.data;
+
+      if (!data || data.source !== "voice-eva") return;
 
       switch (data.type) {
-        case 'load':
-          if (data.videoId) applyVideo(data.videoId, !!data.autoplay, { seekTime: Number(data.time) || 0, forceReload: true });
+        case "load":
+          loadVideo(
+            data.videoId,
+            Boolean(data.autoplay),
+            Number(data.time) || 0
+          );
           break;
-        case 'play':
-          try { if (player.paused) player.play(); } catch (e) {}
+
+        case "play":
+          playSafely();
           break;
-        case 'pause':
-          try { if (!player.paused) player.pause(); } catch (e) {}
+
+        case "pause":
+          try {
+            player.pause();
+          } catch {}
           break;
-        case 'seek':
-          if (Number.isFinite(Number(data.time))) {
-            try { player.currentTime = Number(data.time); } catch (e) {}
+
+        case "seek":
+          seek(data.time);
+          break;
+
+        case "stop":
+          try {
+            player.pause();
+            player.currentTime = 0;
+            endedReported = false;
+          } catch {}
+          break;
+
+        case "mute":
+          try {
+            player.muted = true;
+          } catch {}
+          break;
+
+        case "unmute":
+          try {
+            player.muted = false;
+          } catch {}
+          break;
+
+        case "setVolume": {
+          const volume = Number(data.volume);
+
+          if (Number.isFinite(volume)) {
+            try {
+              player.volume = Math.min(1, Math.max(0, volume / 100));
+            } catch {}
           }
           break;
-        case 'stop':
-          try { player.pause(); player.currentTime = 0; endedReported = false; } catch (e) {}
-          break;
-        case 'mute':
-          try { player.muted = true; } catch (e) {}
-          break;
-        case 'unmute':
-          try { player.muted = false; } catch (e) {}
-          break;
-        case 'setVolume':
-          if (Number.isFinite(Number(data.volume))) {
-            try { player.volume = Number(data.volume) / 100; } catch (e) {}
-          }
-          break;
+        }
       }
     }
 
-    if (player) {
-      player.addEventListener('can-play', () => {
-        postParent({ source: 'x-player', type: 'ready', videoId: lastAppliedVideoId || videoId || '' });
+    player.addEventListener("can-play", () => {
+      if (pendingTime > 0) {
+        seek(pendingTime);
+        pendingTime = 0;
+      }
 
-        if (lastAppliedAutoplay) {
-          try { player.muted = false; } catch (e) {}
-          try {
-            const p = player.play();
-            if (p && typeof p.then === 'function') {
-              p.then(() => {
-                soundUnlocked = true;
-                hideSoundHint();
-              }).catch(() => {
-                try { player.muted = true; } catch (e) {}
-                safePlay();
-                showSoundHint();
-                addUnlockListeners();
-              });
-            }
-          } catch (e) {
-            try { player.muted = true; } catch (e2) {}
-            safePlay();
-            showSoundHint();
-            addUnlockListeners();
-          }
-        }
+      postParent({
+        source: "x-player",
+        type: "ready",
+        videoId: currentVideoId
       });
 
-      player.addEventListener('time-update', () => {
-        const now = Number(player.currentTime) || 0;
-        postParent({ source: 'x-player', type: 'time-update', videoId: lastAppliedVideoId || videoId || '', time: now, duration: Number(player.duration) || 0 });
+      if (shouldAutoplay) {
+        playSafely();
+      }
+    });
+
+    player.addEventListener("time-update", () => {
+      postParent({
+        source: "x-player",
+        type: "time-update",
+        videoId: currentVideoId,
+        time: Number(player.currentTime) || 0,
+        duration: Number(player.duration) || 0
       });
+    });
 
-      player.addEventListener('play', () => {
-        endedReported = false;
-        postParent({ source: 'x-player', type: 'state', state: 'playing', videoId: lastAppliedVideoId || videoId || '', time: Number(player.currentTime) || 0 });
+    player.addEventListener("play", () => {
+      endedReported = false;
+
+      postParent({
+        source: "x-player",
+        type: "state",
+        state: "playing",
+        videoId: currentVideoId,
+        time: Number(player.currentTime) || 0
       });
+    });
 
-      player.addEventListener('pause', () => {
-        postParent({ source: 'x-player', type: 'state', state: 'paused', videoId: lastAppliedVideoId || videoId || '', time: Number(player.currentTime) || 0 });
+    player.addEventListener("pause", () => {
+      postParent({
+        source: "x-player",
+        type: "state",
+        state: "paused",
+        videoId: currentVideoId,
+        time: Number(player.currentTime) || 0
       });
+    });
 
-      player.addEventListener('ended', () => {
-        if (endedReported) return;
-        endedReported = true;
-        postParent({ source: 'x-player', type: 'ended', videoId: lastAppliedVideoId || videoId || '', time: Number(player.currentTime) || 0 });
+    player.addEventListener("ended", () => {
+      if (endedReported) return;
+
+      endedReported = true;
+
+      postParent({
+        source: "x-player",
+        type: "ended",
+        videoId: currentVideoId,
+        time: Number(player.currentTime) || 0
       });
-    }
+    });
 
-    window.addEventListener('message', handleParentMessage, false);
+    player.addEventListener("error", (event) => {
+      postParent({
+        source: "x-player",
+        type: "error",
+        videoId: currentVideoId,
+        message: event?.detail?.message || "No se pudo reproducir el video."
+      });
+    });
 
-    if (videoId) {
-      applyVideo(videoId, autoplay, { seekTime: startTime || 0, forceReload: true });
+    window.addEventListener("message", handleParentMessage);
+
+    /*
+     * No existe video predeterminado.
+     * Solo carga cuando la URL contiene ?v=VIDEO_ID.
+     */
+    if (initialVideoId) {
+      loadVideo(initialVideoId, initialAutoplay, initialTime);
     }
   </script>
 </body>
