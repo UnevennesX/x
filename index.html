@@ -109,9 +109,27 @@
                 postToParent({ type: 'error' });
             });
 
+            // Lleva el videoId actual (lo usa reportDuration para no mandar la
+            // duración de un video viejo después de un 'load').
+            var currentVid = videoId || null;
+
             player.addEventListener('ended', function () {
-                postToParent({ type: 'ended' });
+                postToParent({ type: 'ended', videoId: currentVid });
             });
+
+            // Reportar la duración de la pista actual para que el servidor pueda
+            // auto-avanzar la cola aunque la pestaña esté minimizada (el evento
+            // 'ended' del iframe se congela en segundo plano).
+            function reportDuration() {
+                var d = player.duration;
+                if (d && isFinite(d) && d > 0) {
+                    postToParent({ type: 'duration', videoId: currentVid, duration: d });
+                }
+            }
+            player.addEventListener('durationchange', reportDuration);
+            player.addEventListener('duration-change', reportDuration);
+            player.addEventListener('loadedmetadata', reportDuration);
+            player.addEventListener('can-play', function () { setTimeout(reportDuration, 300); });
 
             window.addEventListener('message', function (ev) {
                 var data = ev.data;
@@ -120,10 +138,12 @@
                     switch (data.type) {
                         case 'load':
                             if (data.videoId) {
+                                currentVid = data.videoId;
                                 player.setAttribute('src', `youtube/${data.videoId}`);
                                 if (data.autoplay) player.setAttribute('autoplay', '');
                                 else player.removeAttribute('autoplay');
                                 try { if (player.load) player.load(); } catch (e) {}
+                                setTimeout(reportDuration, 500);
                             }
                             break;
                         case 'play':
