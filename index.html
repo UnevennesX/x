@@ -1,259 +1,87 @@
-<!DOCTYPE html>
 <html lang="es">
 <head>
-  <meta charset="UTF-8" />
-  <meta
-    name="viewport"
-    content="width=device-width, initial-scale=1, viewport-fit=cover"
-  />
-  <title>Voice Eva Player</title>
-  <link rel="icon" href="data:," />
+    <meta charset="UTF-8">
+    <title>Vidstack Player</title>
+    <link rel="stylesheet" href="https://cdn.vidstack.io/player/theme.css">
+    <link rel="stylesheet" href="https://cdn.vidstack.io/player/video.css">
+    <script type="module" src="https://cdn.vidstack.io/player"></script>
+    <script type="module" src="https://cdn.vidstack.io/icons"></script>
+    
+    <link rel="preconnect" href="https://www.google.com" crossorigin="true">
+    <link rel="preconnect" href="https://i.ytimg.com" crossorigin="true">
+    <link rel="preconnect" href="https://googleads.g.doubleclick.net" crossorigin="true">
+    <link rel="preconnect" href="https://static.doubleclick.net" crossorigin="true">
 
-  <style>
-    * {
-      box-sizing: border-box;
-    }
+    <style>
+        /* Hace que toda la ventana ocupe el 100% sin barras de scroll */
+        html, body {
+            margin: 0;
+            padding: 0;
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+            background-color: #000;
+        }
 
-    html, body {
-      margin: 0;
-      padding: 0;
-      width: 100%;
-      height: 100%;
-      background: #000;
-      color: #fff;
-      font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
-      overflow: hidden;
-    }
-
-    #stage {
-      position: fixed;
-      inset: 0;
-      background: #000;
-    }
-
-    #player, iframe {
-      width: 100% !important;
-      height: 100% !important;
-      border: 0 !important;
-      display: block;
-    }
-
-    #msg {
-      position: absolute;
-      inset: 0;
-      display: none;
-      place-items: center;
-      color: #fff;
-      text-align: center;
-      padding: 24px;
-      z-index: 20;
-    }
-    #msg.show {
-      display: grid;
-    }
-  </style>
+        /* Fuerza al contenedor y al reproductor a expandirse por completo */
+        #playerHost,
+        #rmExternalPlayer {
+            width: 100% !important;
+            height: 100% !important;
+            max-width: none !important;
+            margin: 0 !important;
+        }
+    </style>
 </head>
-
 <body>
-  <div id="stage">
-    <div id="player"></div>
-    <div id="msg">
-      Falta el parámetro <code>?v=VIDEO_ID</code> en la URL.
+    <div id="playerHost">
+        <media-player id="rmExternalPlayer" class="vds-player" src="youtube/EgNPamcXUss" view-type="video" stream-type="on-demand" log-level="warn" crossorigin="" playsinline="" autoplay="" data-media-player="" tabindex="0" role="region" aria-label="Video Player" data-orientation="landscape">
+            <media-provider keep-alive="" data-media-provider="">
+                <iframe tabindex="-1" data-no-controls="" class="vds-youtube" aria-hidden="true" frameborder="0" allow="autoplay; fullscreen; encrypted-media; picture-in-picture; accelerometer; gyroscope"></iframe>
+            </media-provider>
+            <media-controls class="vds-controls" role="group" style="pointer-events: none;">
+                <media-controls-group class="vds-controls-group top-right" style="pointer-events: auto;">
+                    <media-menu class="vds-menu" data-root="" data-disabled="" style="display: contents;">
+                        <media-menu-button class="vds-menu-button vds-button" aria-label="Calidad de video" tabindex="0" role="button" id="media-menu-button-1" aria-haspopup="menu" aria-expanded="false" data-root="" aria-disabled="true" type="button">
+                            <media-icon class="vds-icon" type="settings">
+                                <svg width="100%" height="100%" viewBox="0 0 32 32" fill="none" aria-hidden="true" focusable="false" xmlns="http://www.w3.org/2000/svg">
+                                    <path fill-rule="evenodd" clip-rule="evenodd" d="M13.5722 5.33333C13.2429 5.33333 12.9629 5.57382 12.9132 5.89938L12.4063 9.21916C12.4 9.26058 12.3746 9.29655 12.3378 9.31672C12.2387 9.37118 12.1409 9.42779 12.0444 9.48648C12.0086 9.5083 11.9646 9.51242 11.9255 9.49718L8.79572 8.27692C8.48896 8.15732 8.14083 8.27958 7.9762 8.56472L5.5491 12.7686C5.38444 13.0538 5.45271 13.4165 5.70981 13.6223L8.33308 15.7225C8.3658 15.7487 8.38422 15.7887 8.38331 15.8306C8.38209 15.8867 8.38148 15.9429 8.38148 15.9993C8.38148 16.0558 8.3821 16.1121 8.38332 16.1684C8.38423 16.2102 8.36582 16.2503 8.33313 16.2765L5.7103 18.3778C5.45334 18.5836 5.38515 18.9462 5.54978 19.2314L7.97688 23.4352C8.14155 23.7205 8.48981 23.8427 8.79661 23.723L11.926 22.5016C11.9651 22.4864 12.009 22.4905 12.0449 22.5123C12.1412 22.5709 12.2388 22.6274 12.3378 22.6818C12.3745 22.7019 12.4 22.7379 12.4063 22.7793L12.9132 26.0993C12.9629 26.4249 13.2429 26.6654 13.5722 26.6654H18.4264C18.7556 26.6654 19.0356 26.425 19.0854 26.0995L19.5933 22.7801C19.5997 22.7386 19.6252 22.7027 19.6619 22.6825C19.7614 22.6279 19.8596 22.5711 19.9564 22.5121C19.9923 22.4903 20.0362 22.4862 20.0754 22.5015L23.2035 23.7223C23.5103 23.842 23.8585 23.7198 24.0232 23.4346L26.4503 19.2307C26.6149 18.9456 26.5467 18.583 26.2898 18.3771L23.6679 16.2766C23.6352 16.2504 23.6168 16.2104 23.6177 16.1685C23.619 16.1122 23.6196 16.0558 23.6196 15.9993C23.6196 15.9429 23.619 15.8866 23.6177 15.8305C23.6168 15.7886 23.6353 15.7486 23.668 15.7224L26.2903 13.623C26.5474 13.4172 26.6156 13.0544 26.451 12.7692L24.0239 8.56537C23.8592 8.28023 23.5111 8.15797 23.2043 8.27757L20.0758 9.49734C20.0367 9.51258 19.9927 9.50846 19.9569 9.48664C19.8599 9.42762 19.7616 9.37071 19.6618 9.31596C19.6251 9.2958 19.5997 9.25984 19.5933 9.21843L19.0854 5.89915C19.0356 5.57369 18.7556 5.33333 18.4264 5.33333H13.5722ZM16.0001 20.2854C18.3672 20.2854 20.2862 18.3664 20.2862 15.9993C20.2862 13.6322 18.3672 11.7132 16.0001 11.7132C13.6329 11.7132 11.714 13.6322 11.714 15.9993C11.714 18.3664 13.6329 20.2854 16.0001 20.2854Z" fill="currentColor"></path>
+                                </svg>
+                            </media-icon>
+                        </media-menu-button>
+                        <media-menu-items class="vds-menu-items" id="media-menu-1" role="menu" tabindex="-1" data-root="" aria-hidden="true" style="display: none; --menu-height: 24px;">
+                            <media-quality-radio-group class="vds-radio-group" value="auto">
+                                <template>
+                                    <media-radio class="vds-radio">
+                                        <media-icon class="vds-icon" type="radio-check"></media-icon>
+                                        <span class="vds-radio-label" data-part="label"></span>
+                                        <span class="vds-badge" data-part="bitrate"></span>
+                                    </media-radio>
+                                </template>
+                                <media-radio class="vds-radio" value="auto" tabindex="-1" role="menuitemradio" aria-checked="true" data-checked="">
+                                    <media-icon class="vds-icon" type="radio-check"><svg width="100%" height="100%" viewBox="0 0 32 32" fill="none" aria-hidden="true" focusable="false" xmlns="http://www.w3.org/2000/svg"></svg></media-icon>
+                                    <span class="vds-radio-label" data-part="label">Auto</span>
+                                    <span class="vds-badge" data-part="bitrate"></span>
+                                </media-radio>
+                            </media-quality-radio-group>
+                        </media-menu-items>
+                    </media-menu>
+                </media-controls-group>
+            </media-controls>
+        </media-player>
     </div>
-  </div>
 
-  <script src="https://www.youtube.com/iframe_api"></script>
-
-  <script>
-    const params = new URLSearchParams(window.location.search);
-    const initialVideoId = (params.get("v") || "").trim();
-    const initialAutoplay = params.get("autoplay") !== "0";
-    const initialTime = Math.max(0, Number(params.get("t")) || 0);
-
-    const msg = document.getElementById("msg");
-
-    let player = null;
-    let isApiReady = false;
-    let currentVideoId = "";
-    let wantsAutoplay = true;
-    let pendingSeek = 0;
-    let endedReported = false;
-    let timeInterval = null;
-
-    function post(m) {
-      try {
-        window.parent.postMessage(
-          Object.assign({ source: "x-player" }, m),
-          "*"
-        );
-      } catch {}
-    }
-
-    function startTimeTracker() {
-      stopTimeTracker();
-      timeInterval = setInterval(() => {
-        if (player && typeof player.getCurrentTime === "function") {
-          try {
-            post({
-              type: "time-update",
-              videoId: currentVideoId,
-              time: Number(player.getCurrentTime()) || 0,
-              duration: Number(player.getDuration()) || 0
-            });
-          } catch {}
-        }
-      }, 250);
-    }
-
-    function stopTimeTracker() {
-      if (timeInterval) {
-        clearInterval(timeInterval);
-        timeInterval = null;
-      }
-    }
-
-    window.onYouTubeIframeAPIReady = function() {
-      isApiReady = true;
-      if (initialVideoId) {
-        loadVideo(initialVideoId, initialAutoplay, initialTime);
-      } else {
-        msg.classList.add("show");
-      }
-    };
-
-    function createPlayer(videoId) {
-      player = new YT.Player("player", {
-        videoId: videoId,
-        playerVars: {
-          autoplay: wantsAutoplay ? 1 : 0,
-          controls: 1, // Interfaz nativa con engranaje de calidad
-          rel: 0,
-          modestbranding: 1,
-          playsinline: 1,
-          enablejsapi: 1
-        },
-        events: {
-          onReady: (event) => {
-            if (pendingSeek > 0) {
-              try { event.target.seekTo(pendingSeek, true); } catch {}
-              pendingSeek = 0;
+    <script>
+        const params = new URLSearchParams(window.location.search);
+        const videoId = params.get('v');
+        const autoplay = params.get('autoplay');
+        if (videoId) {
+            const player = document.getElementById('rmExternalPlayer');
+            if (player) {
+                player.setAttribute('src', `youtube/${videoId}`);
+                if (autoplay === '1') player.setAttribute('autoplay', '');
             }
-
-            post({ type: "ready", videoId: currentVideoId });
-
-            if (wantsAutoplay) {
-              try { event.target.playVideo(); } catch {}
-            }
-          },
-          onStateChange: (event) => {
-            if (event.data === YT.PlayerState.PLAYING) {
-              endedReported = false;
-              startTimeTracker();
-              post({
-                type: "state",
-                state: "playing",
-                videoId: currentVideoId,
-                time: Number(player.getCurrentTime()) || 0
-              });
-            } else if (event.data === YT.PlayerState.PAUSED) {
-              stopTimeTracker();
-              post({
-                type: "state",
-                state: "paused",
-                videoId: currentVideoId,
-                time: Number(player.getCurrentTime()) || 0
-              });
-            } else if (event.data === YT.PlayerState.ENDED) {
-              stopTimeTracker();
-              if (!endedReported) {
-                endedReported = true;
-                post({
-                  type: "ended",
-                  videoId: currentVideoId,
-                  time: Number(player.getDuration()) || 0
-                });
-              }
-            }
-          },
-          onError: (event) => {
-            post({
-              type: "error",
-              videoId: currentVideoId,
-              code: event.data,
-              message: "Error al reproducir el video."
-            });
-          }
         }
-      });
-    }
-
-    function loadVideo(id, autoplay, time) {
-      if (!id) return;
-      currentVideoId = String(id).trim();
-      wantsAutoplay = autoplay !== undefined ? !!autoplay : true;
-      pendingSeek = Math.max(0, Number(time) || 0);
-      endedReported = false;
-
-      if (!isApiReady) return;
-
-      if (!player) {
-        createPlayer(currentVideoId);
-      } else {
-        if (wantsAutoplay) {
-          player.loadVideoById({
-            videoId: currentVideoId,
-            startSeconds: pendingSeek
-          });
-        } else {
-          player.cueVideoById({
-            videoId: currentVideoId,
-            startSeconds: pendingSeek
-          });
-        }
-      }
-    }
-
-    // Receptor de mensajes desde la app padre
-    window.addEventListener("message", (event) => {
-      const data = event?.data;
-      if (!data || data.source !== "voice-eva" || !player) return;
-
-      switch (data.type) {
-        case "load":
-          loadVideo(data.videoId, data.autoplay !== undefined ? !!data.autoplay : true, Number(data.time) || 0);
-          break;
-        case "play":
-          try { player.playVideo(); } catch {}
-          break;
-        case "pause":
-          try { player.pauseVideo(); } catch {}
-          break;
-        case "stop":
-          try {
-            player.stopVideo();
-            endedReported = false;
-          } catch {}
-          break;
-        case "seek":
-          if (Number.isFinite(Number(data.time))) {
-            try { player.seekTo(Number(data.time), true); } catch {}
-          }
-          break;
-        case "mute":
-          try { player.mute(); } catch {}
-          break;
-        case "unmute":
-          try { player.unMute(); } catch {}
-          break;
-        case "setVolume": {
-          const v = Number(data.volume);
-          if (Number.isFinite(v)) {
-            try { player.setVolume(Math.min(100, Math.max(0, v))); } catch {}
-          }
-          break;
-        }
-      }
-    });
-  </script>
+    </script>
 </body>
 </html>
