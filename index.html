@@ -109,6 +109,10 @@
                 postToParent({ type: 'error' });
             });
 
+            player.addEventListener('ended', function () {
+                postToParent({ type: 'ended' });
+            });
+
             window.addEventListener('message', function (ev) {
                 var data = ev.data;
                 if (!data || typeof data !== 'object' || data.source !== 'voice-eva') return;
