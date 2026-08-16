@@ -89,9 +89,15 @@
                 player.setAttribute('src', `youtube/${videoId}`);
                 if (autoplay === '1') player.setAttribute('autoplay', '');
                 if (startTime > 0) {
-                    player.addEventListener('can-play', function onReadySeek() {
+                    // Un solo disparo: buscar a startTime solo al primer can-play.
+                    // Si no se remueve, cada can-play posterior (seek, buffer tras
+                    // pause/play) vuelve a saltar al inicio y parece que el
+                    // reproductor se recarga.
+                    var onReadySeek = function () {
+                        player.removeEventListener('can-play', onReadySeek);
                         try { player.currentTime = startTime; } catch (e) {}
-                    });
+                    };
+                    player.addEventListener('can-play', onReadySeek);
                 }
             }
 
@@ -143,6 +149,16 @@
                                 if (data.autoplay) player.setAttribute('autoplay', '');
                                 else player.removeAttribute('autoplay');
                                 try { if (player.load) player.load(); } catch (e) {}
+                                // 'load' reinicia el video desde 0; retroceder a la
+                                // posición deseada en el primer can-play (un solo disparo).
+                                var loadStart = Math.max(0, Number(data.time) || 0);
+                                if (loadStart > 0) {
+                                    var onLoadSeek = function () {
+                                        player.removeEventListener('can-play', onLoadSeek);
+                                        try { player.currentTime = loadStart; } catch (e) {}
+                                    };
+                                    player.addEventListener('can-play', onLoadSeek);
+                                }
                                 setTimeout(reportDuration, 500);
                             }
                             break;
