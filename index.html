@@ -75,12 +75,78 @@
         const params = new URLSearchParams(window.location.search);
         const videoId = params.get('v');
         const autoplay = params.get('autoplay');
-        if (videoId) {
-            const player = document.getElementById('rmExternalPlayer');
-            if (player) {
+        const startTime = parseFloat(params.get('t')) || 0;
+        const player = document.getElementById('rmExternalPlayer');
+
+        function postToParent(m) {
+            try { window.parent.postMessage(Object.assign({ source: 'x-player' }, m), '*'); } catch (e) {}
+        }
+
+        if (player) {
+            if (autoplay !== '1') player.removeAttribute('autoplay');
+
+            if (videoId) {
                 player.setAttribute('src', `youtube/${videoId}`);
                 if (autoplay === '1') player.setAttribute('autoplay', '');
+                if (startTime > 0) {
+                    player.addEventListener('can-play', function onReadySeek() {
+                        try { player.currentTime = startTime; } catch (e) {}
+                    });
+                }
             }
+
+            var reportedReady = false;
+            function markReady() {
+                if (reportedReady) return;
+                reportedReady = true;
+                postToParent({ type: 'ready' });
+            }
+            player.addEventListener('can-play', markReady);
+            player.addEventListener('playing', markReady);
+            setTimeout(markReady, 2500);
+
+            player.addEventListener('error', function () {
+                postToParent({ type: 'error' });
+            });
+
+            window.addEventListener('message', function (ev) {
+                var data = ev.data;
+                if (!data || typeof data !== 'object' || data.source !== 'voice-eva') return;
+                try {
+                    switch (data.type) {
+                        case 'load':
+                            if (data.videoId) {
+                                player.setAttribute('src', `youtube/${data.videoId}`);
+                                if (data.autoplay) player.setAttribute('autoplay', '');
+                                else player.removeAttribute('autoplay');
+                                try { if (player.load) player.load(); } catch (e) {}
+                            }
+                            break;
+                        case 'play':
+                            try { player.play(); } catch (e) {}
+                            break;
+                        case 'pause':
+                            try { player.pause(); } catch (e) {}
+                            break;
+                        case 'seek':
+                            player.currentTime = Math.max(0, Number(data.time) || 0);
+                            break;
+                        case 'stop':
+                            try { player.pause(); } catch (e) {}
+                            player.currentTime = 0;
+                            break;
+                        case 'mute':
+                            player.muted = true;
+                            break;
+                        case 'unmute':
+                            player.muted = false;
+                            break;
+                        case 'setVolume':
+                            player.volume = Math.max(0, Math.min(1, (Number(data.volume) || 0) / 100));
+                            break;
+                    }
+                } catch (e) {}
+            });
         }
     </script>
 </body>
