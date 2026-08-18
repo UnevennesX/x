@@ -35,7 +35,7 @@
 </head>
 <body>
     <div id="playerHost">
-        <media-player id="rmExternalPlayer" class="vds-player" view-type="video" stream-type="on-demand" log-level="warn" crossorigin="" playsinline="" data-media-player="" tabindex="0" role="region" aria-label="Video Player" data-orientation="landscape">
+        <media-player id="rmExternalPlayer" class="vds-player" view-type="audio" stream-type="on-demand" log-level="warn" crossorigin="" playsinline="" data-media-player="" tabindex="0" role="region" aria-label="Video Player" data-orientation="landscape">
             <media-provider keep-alive="" data-media-provider="">
                 <iframe tabindex="-1" data-no-controls="" class="vds-youtube" aria-hidden="true" frameborder="0" allow="autoplay; fullscreen; encrypted-media; picture-in-picture; accelerometer; gyroscope"></iframe>
             </media-provider>
@@ -141,21 +141,34 @@
             // los eventos (durationchange/can-play) pueden tardar, y si el primer
             // reporte se pierde el servidor no puede auto-avanzar la cola.
             var durRetry = 0;
+            var reportInterval = null;
             function scheduleReportDuration() {
                 durRetry = 0;
-                var tryReport = function () {
-                    if (reportDuration()) return;
-                    if (durRetry < 10) {
+                if (reportInterval) clearInterval(reportInterval);
+                reportInterval = setInterval(function () {
+                    if (reportDuration()) {
+                        clearInterval(reportInterval);
+                        reportInterval = null;
+                    } else {
                         durRetry++;
-                        setTimeout(tryReport, 600);
+                        if (durRetry > 30) {
+                            clearInterval(reportInterval);
+                            reportInterval = null;
+                        }
                     }
-                };
-                tryReport();
+                }, 1000);
             }
             player.addEventListener('durationchange', reportDuration);
             player.addEventListener('duration-change', reportDuration);
             player.addEventListener('loadedmetadata', reportDuration);
-            player.addEventListener('can-play', function () { setTimeout(reportDuration, 300); });
+            player.addEventListener('can-play', scheduleReportDuration);
+            
+            var lastExpectedAutoplay = false;
+            setInterval(function() {
+                if (lastExpectedAutoplay && player.paused) {
+                    try { if (player.play) player.play().catch(function(){}); } catch(e){}
+                }
+            }, 3000);
 
             window.addEventListener('message', function (ev) {
                 var data = ev.data;
@@ -171,8 +184,13 @@
                                 // (el load() síncrono puede recargar el video previo
                                 // porque Vidstack procesa el src en otro ciclo).
                                 player.src = 'youtube/' + data.videoId;
-                                if (data.autoplay) player.setAttribute('autoplay', '');
-                                else player.removeAttribute('autoplay');
+                                if (data.autoplay) {
+                                    player.setAttribute('autoplay', '');
+                                    lastExpectedAutoplay = true;
+                                } else {
+                                    player.removeAttribute('autoplay');
+                                    lastExpectedAutoplay = false;
+                                }
                                 // 'load' reinicia el video desde 0; retroceder a la
                                 // posición deseada en el primer can-play (un solo disparo).
                                 var loadStart = Math.max(0, Number(data.time) || 0);
@@ -190,15 +208,18 @@
                             }
                             break;
                         case 'play':
+                            lastExpectedAutoplay = true;
                             try { player.play(); } catch (e) {}
                             break;
                         case 'pause':
+                            lastExpectedAutoplay = false;
                             try { player.pause(); } catch (e) {}
                             break;
                         case 'seek':
                             player.currentTime = Math.max(0, Number(data.time) || 0);
                             break;
                         case 'stop':
+                            lastExpectedAutoplay = false;
                             try { player.pause(); } catch (e) {}
                             player.currentTime = 0;
                             break;
