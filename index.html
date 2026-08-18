@@ -35,7 +35,7 @@
 </head>
 <body>
     <div id="playerHost">
-        <media-player id="rmExternalPlayer" class="vds-player" src="youtube/EgNPamcXUss" view-type="video" stream-type="on-demand" log-level="warn" crossorigin="" playsinline="" autoplay="" data-media-player="" tabindex="0" role="region" aria-label="Video Player" data-orientation="landscape">
+        <media-player id="rmExternalPlayer" class="vds-player" view-type="video" stream-type="on-demand" log-level="warn" crossorigin="" playsinline="" data-media-player="" tabindex="0" role="region" aria-label="Video Player" data-orientation="landscape">
             <media-provider keep-alive="" data-media-provider="">
                 <iframe tabindex="-1" data-no-controls="" class="vds-youtube" aria-hidden="true" frameborder="0" allow="autoplay; fullscreen; encrypted-media; picture-in-picture; accelerometer; gyroscope"></iframe>
             </media-provider>
@@ -86,7 +86,10 @@
             if (autoplay !== '1') player.removeAttribute('autoplay');
 
             if (videoId) {
-                player.setAttribute('src', `youtube/${videoId}`);
+                // Usar la propiedad `src` (no setAttribute + load()): Vidstack
+                // procesa el src de forma asíncrona y un load() síncrono tras el
+                // setAttribute puede recargar el video anterior.
+                player.src = 'youtube/' + videoId;
                 if (autoplay === '1') player.setAttribute('autoplay', '');
                 if (startTime > 0) {
                     // Un solo disparo: buscar a startTime solo al primer can-play.
@@ -130,7 +133,24 @@
                 var d = player.duration;
                 if (d && isFinite(d) && d > 0) {
                     postToParent({ type: 'duration', videoId: currentVid, duration: d });
+                    return true;
                 }
+                return false;
+            }
+            // Reintenta reportar la duración unas cuantas veces: en pestaña oculta
+            // los eventos (durationchange/can-play) pueden tardar, y si el primer
+            // reporte se pierde el servidor no puede auto-avanzar la cola.
+            var durRetry = 0;
+            function scheduleReportDuration() {
+                durRetry = 0;
+                var tryReport = function () {
+                    if (reportDuration()) return;
+                    if (durRetry < 10) {
+                        durRetry++;
+                        setTimeout(tryReport, 600);
+                    }
+                };
+                tryReport();
             }
             player.addEventListener('durationchange', reportDuration);
             player.addEventListener('duration-change', reportDuration);
@@ -145,10 +165,14 @@
                         case 'load':
                             if (data.videoId) {
                                 currentVid = data.videoId;
-                                player.setAttribute('src', `youtube/${data.videoId}`);
+                                // Cambiar de video sobre el MISMO <media-player>
+                                // (keep-alive conserva el iframe de YouTube). Se usa
+                                // la propiedad `src`; NO setAttribute + player.load()
+                                // (el load() síncrono puede recargar el video previo
+                                // porque Vidstack procesa el src en otro ciclo).
+                                player.src = 'youtube/' + data.videoId;
                                 if (data.autoplay) player.setAttribute('autoplay', '');
                                 else player.removeAttribute('autoplay');
-                                try { if (player.load) player.load(); } catch (e) {}
                                 // 'load' reinicia el video desde 0; retroceder a la
                                 // posición deseada en el primer can-play (un solo disparo).
                                 var loadStart = Math.max(0, Number(data.time) || 0);
@@ -159,7 +183,10 @@
                                     };
                                     player.addEventListener('can-play', onLoadSeek);
                                 }
-                                setTimeout(reportDuration, 500);
+                                scheduleReportDuration();
+                                if (data.autoplay) {
+                                    try { if (player.play) player.play().catch(function () {}); } catch (e) {}
+                                }
                             }
                             break;
                         case 'play':
