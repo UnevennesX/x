@@ -164,17 +164,6 @@
             player.addEventListener('can-play', scheduleReportDuration);
             
             var lastExpectedAutoplay = false;
-            
-            // Si YouTube auto-pausa el video al minimizar (Page Visibility), forzamos el play inmediatamente.
-            player.addEventListener('pause', function() {
-                if (lastExpectedAutoplay) {
-                    setTimeout(function() {
-                        if (player.paused && lastExpectedAutoplay) {
-                            try { if (player.play) player.play().catch(function(){}); } catch(e){}
-                        }
-                    }, 50);
-                }
-            });
 
             setInterval(function() {
                 if (lastExpectedAutoplay && player.paused) {
