@@ -1,6 +1,8 @@
+<!DOCTYPE html>
 <html lang="es">
 <head>
     <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>Vidstack Player</title>
     <link rel="stylesheet" href="https://cdn.vidstack.io/player/theme.css">
     <link rel="stylesheet" href="https://cdn.vidstack.io/player/video.css">
@@ -13,7 +15,6 @@
     <link rel="preconnect" href="https://static.doubleclick.net" crossorigin="true">
 
     <style>
-        /* Hace que toda la ventana ocupe el 100% sin barras de scroll */
         html, body {
             margin: 0;
             padding: 0;
@@ -23,7 +24,6 @@
             background-color: #000;
         }
 
-        /* Fuerza al contenedor y al reproductor a expandirse por completo */
         #playerHost,
         #rmExternalPlayer {
             width: 100% !important;
@@ -82,21 +82,35 @@
             try { window.parent.postMessage(Object.assign({ source: 'x-player' }, m), '*'); } catch (e) {}
         }
 
+        function safePlay() {
+            if (!player) return;
+            try {
+                const playPromise = player.play();
+                if (playPromise !== undefined && typeof playPromise.catch === 'function') {
+                    playPromise.catch(function (err) {
+                        // Si falla por autoplay policy en móvil, silenciamos el error para no colgar el script
+                    });
+                }
+            } catch (e) {}
+        }
+
         if (player) {
+            let currentVid = videoId || null;
+            let lastExpectedAutoplay = autoplay === '1';
+            let endedThisVideo = false;
+            let endedReported = false;
+            let reportedReady = false;
+
             if (autoplay !== '1') player.removeAttribute('autoplay');
 
             if (videoId) {
-                // Usar la propiedad `src` (no setAttribute + load()): Vidstack
-                // procesa el src de forma asíncrona y un load() síncrono tras el
-                // setAttribute puede recargar el video anterior.
                 player.src = 'youtube/' + videoId;
-                if (autoplay === '1') player.setAttribute('autoplay', '');
+                if (autoplay === '1') {
+                    player.setAttribute('autoplay', '');
+                    lastExpectedAutoplay = true;
+                }
                 if (startTime > 0) {
-                    // Un solo disparo: buscar a startTime solo al primer can-play.
-                    // Si no se remueve, cada can-play posterior (seek, buffer tras
-                    // pause/play) vuelve a saltar al inicio y parece que el
-                    // reproductor se recarga.
-                    var onReadySeek = function () {
+                    const onReadySeek = function () {
                         player.removeEventListener('can-play', onReadySeek);
                         try { player.currentTime = startTime; } catch (e) {}
                     };
@@ -104,7 +118,6 @@
                 }
             }
 
-            var reportedReady = false;
             function markReady() {
                 if (reportedReady) return;
                 reportedReady = true;
@@ -118,13 +131,6 @@
                 postToParent({ type: 'error' });
             });
 
-            // Lleva el videoId actual (lo usa reportDuration para no mandar la
-            // duración de un video viejo después de un 'load').
-            var currentVid = videoId || null;
-
-            var endedThisVideo = false;
-            var endedReported = false;
-
             player.addEventListener('ended', function () {
                 endedThisVideo = true;
                 if (!endedReported) {
@@ -133,22 +139,17 @@
                 }
             });
 
-            // Reportar la duración de la pista actual para que el servidor pueda
-            // auto-avanzar la cola aunque la pestaña esté minimizada (el evento
-            // 'ended' del iframe se congela en segundo plano).
             function reportDuration() {
-                var d = player.duration;
+                const d = player.duration;
                 if (d && isFinite(d) && d > 0) {
                     postToParent({ type: 'duration', videoId: currentVid, duration: d });
                     return true;
                 }
                 return false;
             }
-            // Reintenta reportar la duración unas cuantas veces: en pestaña oculta
-            // los eventos (durationchange/can-play) pueden tardar, y si el primer
-            // reporte se pierde el servidor no puede auto-avanzar la cola.
-            var durRetry = 0;
-            var reportInterval = null;
+
+            let durRetry = 0;
+            let reportInterval = null;
             function scheduleReportDuration() {
                 durRetry = 0;
                 if (reportInterval) clearInterval(reportInterval);
@@ -165,24 +166,19 @@
                     }
                 }, 1000);
             }
+
             player.addEventListener('durationchange', reportDuration);
             player.addEventListener('duration-change', reportDuration);
             player.addEventListener('loadedmetadata', reportDuration);
             player.addEventListener('can-play', scheduleReportDuration);
-            
-            var lastExpectedAutoplay = false;
-            var endedThisVideo = false;
 
-            setInterval(function() {
-                // No reiniciar un video que ya terminó: dejar que la app avance la
-                // cola (de lo contrario el video se reinicia en loop y la pista
-                // nunca "termina" → la siguiente canción del historial no avanza).
+            // Verificador de reproducción automática y finalización
+            setInterval(function () {
                 if (endedThisVideo) {
                     lastExpectedAutoplay = false;
                     return;
                 }
-                // Seguridad adicional: si el video está cerca del final (menos de 1s),
-                // considerarlo terminado para evitar loops.
+
                 try {
                     if (player.duration && player.currentTime >= player.duration - 1) {
                         endedThisVideo = true;
@@ -194,13 +190,14 @@
                         return;
                     }
                 } catch (e) {}
+
                 if (lastExpectedAutoplay && player.paused) {
-                    try { if (player.play) player.play().catch(function(){}); } catch(e){}
+                    safePlay();
                 }
-            }, 3000);
+            }, 2500);
 
             window.addEventListener('message', function (ev) {
-                var data = ev.data;
+                const data = ev.data;
                 if (!data || typeof data !== 'object' || data.source !== 'voice-eva') return;
                 try {
                     switch (data.type) {
@@ -209,12 +206,8 @@
                                 currentVid = data.videoId;
                                 endedThisVideo = false;
                                 endedReported = false;
-                                // Cambiar de video sobre el MISMO <media-player>
-                                // (keep-alive conserva el iframe de YouTube). Se usa
-                                // la propiedad `src`; NO setAttribute + player.load()
-                                // (el load() síncrono puede recargar el video previo
-                                // porque Vidstack procesa el src en otro ciclo).
                                 player.src = 'youtube/' + data.videoId;
+
                                 if (data.autoplay) {
                                     player.setAttribute('autoplay', '');
                                     lastExpectedAutoplay = true;
@@ -222,25 +215,25 @@
                                     player.removeAttribute('autoplay');
                                     lastExpectedAutoplay = false;
                                 }
-                                // 'load' reinicia el video desde 0; retroceder a la
-                                // posición deseada en el primer can-play (un solo disparo).
-                                var loadStart = Math.max(0, Number(data.time) || 0);
-                                if (loadStart > 0) {
-                                    var onLoadSeek = function () {
-                                        player.removeEventListener('can-play', onLoadSeek);
+
+                                const loadStart = Math.max(0, Number(data.time) || 0);
+                                const onCanPlay = function () {
+                                    player.removeEventListener('can-play', onCanPlay);
+                                    if (loadStart > 0) {
                                         try { player.currentTime = loadStart; } catch (e) {}
-                                    };
-                                    player.addEventListener('can-play', onLoadSeek);
-                                }
+                                    }
+                                    if (lastExpectedAutoplay) {
+                                        safePlay();
+                                    }
+                                };
+                                player.addEventListener('can-play', onCanPlay);
+
                                 scheduleReportDuration();
-                                if (data.autoplay) {
-                                    try { if (player.play) player.play().catch(function () {}); } catch (e) {}
-                                }
                             }
                             break;
                         case 'play':
                             lastExpectedAutoplay = true;
-                            try { player.play(); } catch (e) {}
+                            safePlay();
                             break;
                         case 'pause':
                             lastExpectedAutoplay = false;
