@@ -122,8 +122,15 @@
             // duración de un video viejo después de un 'load').
             var currentVid = videoId || null;
 
+            var endedThisVideo = false;
+            var endedReported = false;
+
             player.addEventListener('ended', function () {
-                postToParent({ type: 'ended', videoId: currentVid });
+                endedThisVideo = true;
+                if (!endedReported) {
+                    endedReported = true;
+                    postToParent({ type: 'ended', videoId: currentVid });
+                }
             });
 
             // Reportar la duración de la pista actual para que el servidor pueda
@@ -164,8 +171,29 @@
             player.addEventListener('can-play', scheduleReportDuration);
             
             var lastExpectedAutoplay = false;
+            var endedThisVideo = false;
 
             setInterval(function() {
+                // No reiniciar un video que ya terminó: dejar que la app avance la
+                // cola (de lo contrario el video se reinicia en loop y la pista
+                // nunca "termina" → la siguiente canción del historial no avanza).
+                if (endedThisVideo) {
+                    lastExpectedAutoplay = false;
+                    return;
+                }
+                // Seguridad adicional: si el video está cerca del final (menos de 1s),
+                // considerarlo terminado para evitar loops.
+                try {
+                    if (player.duration && player.currentTime >= player.duration - 1) {
+                        endedThisVideo = true;
+                        if (!endedReported) {
+                            endedReported = true;
+                            postToParent({ type: 'ended', videoId: currentVid });
+                        }
+                        lastExpectedAutoplay = false;
+                        return;
+                    }
+                } catch (e) {}
                 if (lastExpectedAutoplay && player.paused) {
                     try { if (player.play) player.play().catch(function(){}); } catch(e){}
                 }
@@ -179,6 +207,8 @@
                         case 'load':
                             if (data.videoId) {
                                 currentVid = data.videoId;
+                                endedThisVideo = false;
+                                endedReported = false;
                                 // Cambiar de video sobre el MISMO <media-player>
                                 // (keep-alive conserva el iframe de YouTube). Se usa
                                 // la propiedad `src`; NO setAttribute + player.load()
