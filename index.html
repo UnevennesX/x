@@ -48,7 +48,7 @@
             margin: 0 !important;
             position: absolute;
             inset: 0;
-            opacity: 0; /* Oculto por defecto hasta confirmar reproducción limpia */
+            opacity: 0; /* Oculto preventivamente para no mostrar la pantalla nativa de YT */
             transition: opacity 0.25s ease-in;
         }
 
@@ -56,7 +56,7 @@
             opacity: 1;
         }
 
-        /* --- Cortina de Carga Preventiva (Evita destello del error nativo de YT) --- */
+        /* --- Cortina de Carga Preventiva --- */
         .rm-loading-curtain {
             position: absolute;
             inset: 0;
@@ -170,8 +170,9 @@
             color: #3ea6ff;
         }
 
+        /* Barra de cuenta regresiva (solo visible si hay canciones en cola) */
         .rm-yt-countdown-box {
-            display: flex;
+            display: none;
             align-items: center;
             gap: 10px;
             margin-top: 14px;
@@ -180,7 +181,10 @@
             border: 1px solid rgba(255, 255, 255, 0.08);
             border-radius: 12px;
             width: fit-content;
-            flex-wrap: wrap;
+        }
+
+        .rm-yt-countdown-box.visible {
+            display: flex;
         }
 
         .rm-yt-spinner {
@@ -206,32 +210,6 @@
             font-size: 0.95rem;
         }
 
-        .rm-yt-actions {
-            display: flex;
-            align-items: center;
-            gap: 10px;
-        }
-
-        .rm-yt-btn {
-            background: #ffffff;
-            color: #0f0f0f;
-            border: none;
-            padding: 8px 18px;
-            border-radius: 20px;
-            font-size: 0.8rem;
-            font-weight: 700;
-            cursor: pointer;
-            transition: background 0.15s ease, transform 0.1s ease;
-        }
-
-        .rm-yt-btn:hover {
-            background: #e0e0e0;
-        }
-
-        .rm-yt-btn:active {
-            transform: scale(0.97);
-        }
-
         @media (max-width: 600px) {
             .rm-yt-error-container {
                 flex-direction: column;
@@ -244,9 +222,6 @@
             }
             .rm-yt-countdown-box {
                 margin: 10px auto 0;
-                justify-content: center;
-            }
-            .rm-yt-actions {
                 justify-content: center;
             }
             .rm-yt-link {
@@ -275,7 +250,7 @@
             </media-controls>
         </media-player>
 
-        <!-- Interfaz Única de Error (Cubre completamente cualquier error nativo) -->
+        <!-- Interfaz Única de Error Personalizada -->
         <div id="rmErrorOverlay" class="rm-yt-error-overlay">
             <div class="rm-yt-error-container">
                 <svg class="rm-yt-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
@@ -295,14 +270,12 @@
                         Mirar en YouTube
                     </a>
 
-                    <div class="rm-yt-countdown-box">
+                    <!-- Caja con contador (solo se muestra si hasNext === true) -->
+                    <div class="rm-yt-countdown-box" id="rmCountdownBox">
                         <div class="rm-yt-spinner"></div>
                         <span class="rm-yt-countdown-text">
                             Saltando al próximo video en cola en <strong id="rmCountdownNumber">5</strong> s
                         </span>
-                        <div class="rm-yt-actions">
-                            <button class="rm-yt-btn" id="rmSkipNowBtn">Saltar ahora</button>
-                        </div>
                     </div>
                 </div>
             </div>
@@ -323,13 +296,14 @@
         const errorCodeLabel = document.getElementById('rmErrorCodeLabel');
         const errorReason = document.getElementById('rmErrorReason');
         const watchOnYoutube = document.getElementById('rmWatchOnYoutube');
+        const countdownBox = document.getElementById('rmCountdownBox');
         const countdownNumber = document.getElementById('rmCountdownNumber');
-        const skipNowBtn = document.getElementById('rmSkipNowBtn');
 
         let countdownTimer = null;
         let countdownSec = 5;
         let currentVid = videoId || null;
         let lastExpectedAutoplay = autoplay === '1';
+        let hasNextInQueue = params.get('hasNext') === '1';
         let endedThisVideo = false;
         let endedReported = false;
         let reportedReady = false;
@@ -355,7 +329,7 @@
             },
             150: {
                 title: 'Video no disponible',
-                reason: 'Este video contiene contenido con derechos de autor protegidos (LatinAutor / discográfica) y se ha bloqueado su inserción externa.'
+                reason: 'Este video contiene restricciones de derechos de autor (LatinAutor / discográfica) y se ha bloqueado su inserción externa.'
             },
             153: {
                 title: 'Error de configuración del reproductor',
@@ -389,6 +363,7 @@
                 countdownTimer = null;
             }
             errorOverlay.classList.remove('active');
+            countdownBox.classList.remove('visible');
         }
 
         function clearHangWatchdog() {
@@ -398,12 +373,11 @@
             }
         }
 
-        // Si pasan 4.5 segundos y el video nunca suena ni avanza, se bloquea y lanza el error
         function startHangWatchdog() {
             clearHangWatchdog();
             hangWatchdogTimer = setTimeout(function () {
                 if (!playbackConfirmed) {
-                    console.warn('[Vidstack] Tiempo de espera agotado. Forzando error visual.');
+                    console.warn('[Vidstack] Tiempo de espera agotado. Activando pantalla de error.');
                     triggerCustomError(150);
                 }
             }, 4500);
@@ -412,7 +386,7 @@
         function triggerCustomError(code) {
             clearHangWatchdog();
             
-            // Ocultar iframe de YouTube para que NUNCA se vea el cuadro nativo
+            // Ocultar iframe de YouTube inmediatamente
             player.classList.remove('vds-visible');
             curtain.classList.add('hidden');
 
@@ -427,8 +401,6 @@
             errorReason.textContent = errInfo.reason;
             watchOnYoutube.href = 'https://www.youtube.com/watch?v=' + encodeURIComponent(currentVid || '');
 
-            countdownSec = 5;
-            countdownNumber.textContent = countdownSec;
             errorOverlay.classList.add('active');
 
             try { player.pause(); } catch (e) {}
@@ -436,15 +408,25 @@
 
             if (countdownTimer) clearInterval(countdownTimer);
 
-            countdownTimer = setInterval(function () {
-                countdownSec--;
+            // SOLO activar cuenta regresiva si hay canciones en cola
+            if (hasNextInQueue) {
+                countdownSec = 5;
                 countdownNumber.textContent = countdownSec;
-                if (countdownSec <= 0) {
-                    clearInterval(countdownTimer);
-                    countdownTimer = null;
-                    skipVideo();
-                }
-            }, 1000);
+                countdownBox.classList.add('visible');
+
+                countdownTimer = setInterval(function () {
+                    countdownSec--;
+                    countdownNumber.textContent = countdownSec;
+                    if (countdownSec <= 0) {
+                        clearInterval(countdownTimer);
+                        countdownTimer = null;
+                        skipVideo();
+                    }
+                }, 1000);
+            } else {
+                // Si la cola está vacía, no mostrar contador ni saltar
+                countdownBox.classList.remove('visible');
+            }
         }
 
         function skipVideo() {
@@ -452,10 +434,6 @@
             clearHangWatchdog();
             postToParent({ type: 'skip_fatal', videoId: currentVid });
         }
-
-        skipNowBtn.onclick = function () {
-            skipVideo();
-        };
 
         // --- INTERCEPCIÓN EN TIEMPO REAL DE POSTMESSAGE DE YOUTUBE ---
         window.addEventListener('message', function (ev) {
@@ -465,7 +443,6 @@
                     data = JSON.parse(data);
                 }
                 if (data) {
-                    // Interceptar cualquier código de error interno de YouTube
                     if (data.event === 'onError' || [2, 5, 100, 101, 150, 153, 155].includes(Number(data.info))) {
                         const code = data.info || (data.data && data.data.code) || 150;
                         triggerCustomError(code);
@@ -523,7 +500,6 @@
                 }
             });
 
-            // Captura de errores de Vidstack
             player.addEventListener('error', function (ev) {
                 const detail = ev.detail || ev;
                 let ytCode = 150;
@@ -612,6 +588,7 @@
                                 showCurtain();
                                 clearHangWatchdog();
                                 currentVid = data.videoId;
+                                hasNextInQueue = !!data.hasNext;
                                 endedThisVideo = false;
                                 endedReported = false;
                                 player.src = 'youtube/' + data.videoId;
@@ -638,6 +615,9 @@
                                 player.addEventListener('can-play', onCanPlay);
                                 scheduleReportDuration();
                             }
+                            break;
+                        case 'queue_state':
+                            hasNextInQueue = !!data.hasNext;
                             break;
                         case 'play':
                             hideOverlay();
