@@ -56,7 +56,7 @@
             opacity: 1;
         }
 
-        /* Cortina de Carga Preventiva */
+        /* Cortina inicial para no ver el reproductor nativo de YouTube */
         .rm-loading-curtain {
             position: absolute;
             inset: 0;
@@ -86,11 +86,11 @@
             to { transform: rotate(360deg); }
         }
 
-        /* Overlay Minimalista Profesional */
+        /* Overlay Minimalista de Error */
         .rm-error-overlay {
             position: absolute;
             inset: 0;
-            z-index: 99999;
+            z-index: 999999;
             background: #0e0e11;
             display: none;
             align-items: center;
@@ -113,9 +113,9 @@
             flex-direction: column;
             align-items: center;
             text-align: center;
-            max-width: 440px;
+            max-width: 420px;
             width: 100%;
-            gap: 12px;
+            gap: 10px;
         }
 
         .rm-error-icon-box {
@@ -128,7 +128,7 @@
             align-items: center;
             justify-content: center;
             color: #888890;
-            margin-bottom: 2px;
+            margin-bottom: 4px;
         }
 
         .rm-error-icon-box svg {
@@ -136,20 +136,8 @@
             height: 24px;
         }
 
-        .rm-error-badge {
-            font-size: 0.65rem;
-            font-weight: 700;
-            letter-spacing: 0.08em;
-            text-transform: uppercase;
-            padding: 3px 9px;
-            border-radius: 999px;
-            background: rgba(255, 255, 255, 0.05);
-            border: 1px solid rgba(255, 255, 255, 0.1);
-            color: #a0a0a8;
-        }
-
         .rm-error-title {
-            font-size: 1.15rem;
+            font-size: 1.2rem;
             font-weight: 600;
             color: #ffffff;
             margin: 0;
@@ -157,7 +145,7 @@
         }
 
         .rm-error-reason {
-            font-size: 0.82rem;
+            font-size: 0.84rem;
             line-height: 1.45;
             color: #8c8c96;
             margin: 0;
@@ -169,12 +157,12 @@
             display: none;
             align-items: center;
             gap: 8px;
-            margin-top: 8px;
-            padding: 6px 14px;
-            background: rgba(255, 255, 255, 0.035);
-            border: 1px solid rgba(255, 255, 255, 0.07);
+            margin-top: 10px;
+            padding: 7px 16px;
+            background: rgba(255, 255, 255, 0.04);
+            border: 1px solid rgba(255, 255, 255, 0.08);
             border-radius: 999px;
-            font-size: 0.78rem;
+            font-size: 0.8rem;
             color: #b0b0b8;
         }
 
@@ -183,8 +171,8 @@
         }
 
         .rm-pulse-dot {
-            width: 6px;
-            height: 6px;
+            width: 7px;
+            height: 7px;
             border-radius: 50%;
             background: #ff5252;
             animation: pulse 1.5s ease-in-out infinite;
@@ -198,13 +186,12 @@
 
         .rm-countdown-pill strong {
             color: #ffffff;
-            font-weight: 600;
+            font-weight: 700;
         }
     </style>
 </head>
 <body>
     <div id="playerHost">
-        <!-- Cortina inicial que evita ver el reproductor nativo antes de tiempo -->
         <div id="rmCurtain" class="rm-loading-curtain">
             <div class="rm-curtain-spinner"></div>
         </div>
@@ -222,7 +209,6 @@
             </media-controls>
         </media-player>
 
-        <!-- Overlay Minimalista de Error -->
         <div id="rmErrorOverlay" class="rm-error-overlay">
             <div class="rm-error-container">
                 <div class="rm-error-icon-box">
@@ -233,11 +219,10 @@
                     </svg>
                 </div>
 
-                <span class="rm-error-badge" id="rmErrorCodeLabel">Código 150</span>
                 <h2 class="rm-error-title" id="rmErrorTitle">Video no disponible</h2>
                 <p class="rm-error-reason" id="rmErrorReason">Restringido para reproducción externa por derechos de autor.</p>
 
-                <!-- Cuenta regresiva (visible solo si hay más pistas en cola) -->
+                <!-- Cuenta regresiva (visible solo si hay canciones en cola) -->
                 <div class="rm-countdown-pill" id="rmCountdownBox">
                     <div class="rm-pulse-dot"></div>
                     <span>Siguiente pista en <strong id="rmCountdownNumber">5</strong>s</span>
@@ -254,10 +239,8 @@
         const player = document.getElementById('rmExternalPlayer');
         const curtain = document.getElementById('rmCurtain');
 
-        // Elementos de la interfaz de error
         const errorOverlay = document.getElementById('rmErrorOverlay');
         const errorTitle = document.getElementById('rmErrorTitle');
-        const errorCodeLabel = document.getElementById('rmErrorCodeLabel');
         const errorReason = document.getElementById('rmErrorReason');
         const countdownBox = document.getElementById('rmCountdownBox');
         const countdownNumber = document.getElementById('rmCountdownNumber');
@@ -267,6 +250,7 @@
         let currentVid = videoId || null;
         let lastExpectedAutoplay = autoplay === '1';
         let hasNextInQueue = params.get('hasNext') === '1';
+        let isFatalError = false; // Bloqueo estricto de error para evitar que seek/play lo desmonte
         let endedThisVideo = false;
         let endedReported = false;
         let reportedReady = false;
@@ -277,9 +261,9 @@
             2: { title: 'Parámetro no válido', reason: 'El formato del identificador de video no es compatible.' },
             5: { title: 'Error HTML5', reason: 'El navegador no puede procesar el formato de este video.' },
             100: { title: 'Video no disponible', reason: 'El contenido ha sido eliminado o marcado como privado.' },
-            101: { title: 'Inserción denegada', reason: 'El titular de los derechos no permite la reproducción externa.' },
+            101: { title: 'Inserción bloqueada', reason: 'El titular de los derechos no permite la reproducción externa.' },
             150: { title: 'Video no disponible', reason: 'Restringido para reproducción externa por derechos de autor.' },
-            153: { title: 'Error de origen', reason: 'Restricción de cabecera o política de origen de YouTube.' },
+            153: { title: 'Error de origen', reason: 'Restricción de origen o políticas de seguridad de YouTube.' },
             155: { title: 'Bloqueo de seguridad', reason: 'El entorno de ejecución denegó la carga del reproductor.' }
         };
 
@@ -304,6 +288,7 @@
                 clearInterval(countdownTimer);
                 countdownTimer = null;
             }
+            isFatalError = false;
             errorOverlay.classList.remove('active');
             countdownBox.classList.remove('visible');
         }
@@ -318,15 +303,34 @@
         function startHangWatchdog() {
             clearHangWatchdog();
             hangWatchdogTimer = setTimeout(function () {
-                if (!playbackConfirmed) {
+                if (!playbackConfirmed && !isFatalError) {
                     triggerCustomError(150);
                 }
             }, 4500);
         }
 
+        function startCountdown() {
+            if (countdownTimer) clearInterval(countdownTimer);
+            countdownSec = 5;
+            countdownNumber.textContent = countdownSec;
+            countdownBox.classList.add('visible');
+
+            countdownTimer = setInterval(function () {
+                countdownSec--;
+                countdownNumber.textContent = countdownSec;
+                if (countdownSec <= 0) {
+                    clearInterval(countdownTimer);
+                    countdownTimer = null;
+                    skipVideo();
+                }
+            }, 1000);
+        }
+
         function triggerCustomError(code) {
             clearHangWatchdog();
+            isFatalError = true;
             
+            // Ocultar iframe de YouTube
             player.classList.remove('vds-visible');
             curtain.classList.add('hidden');
 
@@ -337,31 +341,19 @@
             };
 
             errorTitle.textContent = errInfo.title;
-            errorCodeLabel.textContent = 'Código ' + code;
             errorReason.textContent = errInfo.reason;
-
             errorOverlay.classList.add('active');
 
             try { player.pause(); } catch (e) {}
             postToParent({ type: 'error', code: code, videoId: currentVid });
 
-            if (countdownTimer) clearInterval(countdownTimer);
-
             if (hasNextInQueue) {
-                countdownSec = 5;
-                countdownNumber.textContent = countdownSec;
-                countdownBox.classList.add('visible');
-
-                countdownTimer = setInterval(function () {
-                    countdownSec--;
-                    countdownNumber.textContent = countdownSec;
-                    if (countdownSec <= 0) {
-                        clearInterval(countdownTimer);
-                        countdownTimer = null;
-                        skipVideo();
-                    }
-                }, 1000);
+                startCountdown();
             } else {
+                if (countdownTimer) {
+                    clearInterval(countdownTimer);
+                    countdownTimer = null;
+                }
                 countdownBox.classList.remove('visible');
             }
         }
@@ -372,7 +364,7 @@
             postToParent({ type: 'skip_fatal', videoId: currentVid });
         }
 
-        // Intercepción de mensajes internos de YouTube
+        // Intercepción directa de errores internos de YouTube
         window.addEventListener('message', function (ev) {
             try {
                 let data = ev.data;
@@ -387,7 +379,7 @@
         });
 
         function safePlay() {
-            if (!player) return;
+            if (!player || isFatalError) return;
             try {
                 const p = player.play();
                 if (p && typeof p.catch === 'function') p.catch(function () {});
@@ -416,6 +408,7 @@
             }
 
             function onPlaybackSuccess() {
+                if (isFatalError) return;
                 clearHangWatchdog();
                 hideOverlay();
                 hideCurtain();
@@ -428,7 +421,7 @@
             player.addEventListener('can-play', onPlaybackSuccess);
             player.addEventListener('playing', onPlaybackSuccess);
             player.addEventListener('time-update', function () {
-                if (player.currentTime > 0.05) {
+                if (player.currentTime > 0.05 && !isFatalError) {
                     onPlaybackSuccess();
                 }
             });
@@ -454,7 +447,7 @@
 
             function reportDuration() {
                 const d = player.duration;
-                if (d && isFinite(d) && d > 0) {
+                if (d && isFinite(d) && d > 0 && !isFatalError) {
                     postToParent({ type: 'duration', videoId: currentVid, duration: d });
                     return true;
                 }
@@ -487,7 +480,7 @@
 
             // Verificador de auto-play y fin de pista
             setInterval(function () {
-                if (endedThisVideo || errorOverlay.classList.contains('active')) {
+                if (endedThisVideo || isFatalError || errorOverlay.classList.contains('active')) {
                     lastExpectedAutoplay = false;
                     return;
                 }
@@ -504,7 +497,7 @@
                     }
                 } catch (e) {}
 
-                if (lastExpectedAutoplay && player.paused && !errorOverlay.classList.contains('active')) {
+                if (lastExpectedAutoplay && player.paused) {
                     safePlay();
                 }
             }, 2500);
@@ -516,7 +509,8 @@
                 try {
                     switch (data.type) {
                         case 'load':
-                            if (data.videoId) {
+                            // Solo desmontamos el error si se carga una cancion distinta o nueva
+                            if (data.videoId && data.videoId !== currentVid) {
                                 hideOverlay();
                                 showCurtain();
                                 clearHangWatchdog();
@@ -549,20 +543,36 @@
                                 scheduleReportDuration();
                             }
                             break;
+
                         case 'queue_state':
+                            // Actualización dinámica de cola
                             hasNextInQueue = !!data.hasNext;
+                            // Si está en pantalla de error y llega una nueva canción a la cola, arranca la cuenta atrás
+                            if (isFatalError && hasNextInQueue && !countdownTimer) {
+                                startCountdown();
+                            } else if (isFatalError && !hasNextInQueue && countdownTimer) {
+                                clearInterval(countdownTimer);
+                                countdownTimer = null;
+                                countdownBox.classList.remove('visible');
+                            }
                             break;
+
                         case 'play':
-                            hideOverlay();
-                            lastExpectedAutoplay = true;
-                            safePlay();
+                            if (!isFatalError) {
+                                lastExpectedAutoplay = true;
+                                safePlay();
+                            }
                             break;
                         case 'pause':
-                            lastExpectedAutoplay = false;
-                            try { player.pause(); } catch (e) {}
+                            if (!isFatalError) {
+                                lastExpectedAutoplay = false;
+                                try { player.pause(); } catch (e) {}
+                            }
                             break;
                         case 'seek':
-                            player.currentTime = Math.max(0, Number(data.time) || 0);
+                            if (!isFatalError) {
+                                player.currentTime = Math.max(0, Number(data.time) || 0);
+                            }
                             break;
                         case 'stop':
                             hideOverlay();
