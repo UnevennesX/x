@@ -3,7 +3,6 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <!-- Mitigación estricta para Error 153 de YouTube (Envío de Referer requerido) -->
     <meta name="referrer" content="strict-origin-when-cross-origin">
     <title>Vidstack Player</title>
     <link rel="stylesheet" href="https://cdn.vidstack.io/player/theme.css">
@@ -28,16 +27,17 @@
             width: 100%;
             height: 100%;
             overflow: hidden;
-            background-color: #0f0f0f;
-            font-family: "Roboto", "Segoe UI", -apple-system, BlinkMacSystemFont, Arial, sans-serif;
-            color: #fff;
+            background-color: #0c0c0e;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            color: #ffffff;
+            -webkit-font-smoothing: antialiased;
         }
 
         #playerHost {
             width: 100% !important;
             height: 100% !important;
             position: relative;
-            background-color: #0f0f0f;
+            background-color: #0c0c0e;
             overflow: hidden;
         }
 
@@ -48,20 +48,20 @@
             margin: 0 !important;
             position: absolute;
             inset: 0;
-            opacity: 0; /* Oculto preventivamente para no mostrar la pantalla nativa de YT */
-            transition: opacity 0.25s ease-in;
+            opacity: 0;
+            transition: opacity 0.3s ease-in;
         }
 
         #rmExternalPlayer.vds-visible {
             opacity: 1;
         }
 
-        /* --- Cortina de Carga Preventiva --- */
+        /* Cortina de Carga Preventiva */
         .rm-loading-curtain {
             position: absolute;
             inset: 0;
             z-index: 50;
-            background-color: #0f0f0f;
+            background-color: #0c0c0e;
             display: flex;
             align-items: center;
             justify-content: center;
@@ -74,165 +74,137 @@
         }
 
         .rm-curtain-spinner {
-            width: 34px;
-            height: 34px;
-            border: 3px solid rgba(255, 255, 255, 0.1);
-            border-top-color: #3ea6ff;
+            width: 28px;
+            height: 28px;
+            border: 2px solid rgba(255, 255, 255, 0.08);
+            border-top-color: rgba(255, 255, 255, 0.8);
             border-radius: 50%;
-            animation: spin 0.8s linear infinite;
-        }
-
-        /* --- Overlay Profesional Único de Error --- */
-        .rm-yt-error-overlay {
-            position: absolute;
-            inset: 0;
-            z-index: 999999;
-            background: #181818;
-            display: none;
-            align-items: center;
-            justify-content: center;
-            padding: 24px;
-        }
-
-        .rm-yt-error-overlay.active {
-            display: flex;
-        }
-
-        .rm-yt-error-container {
-            display: flex;
-            align-items: flex-start;
-            gap: 22px;
-            max-width: 680px;
-            width: 100%;
-        }
-
-        .rm-yt-icon {
-            flex-shrink: 0;
-            width: 64px;
-            height: 64px;
-            color: #aaaaaa;
-        }
-
-        .rm-yt-content {
-            flex: 1;
-            min-width: 0;
-            display: flex;
-            flex-direction: column;
-            gap: 8px;
-        }
-
-        .rm-yt-header-row {
-            display: flex;
-            align-items: center;
-            gap: 12px;
-            flex-wrap: wrap;
-        }
-
-        .rm-yt-title {
-            font-size: 1.35rem;
-            font-weight: 700;
-            color: #ffffff;
-            margin: 0;
-            line-height: 1.25;
-            letter-spacing: -0.01em;
-        }
-
-        .rm-yt-code-tag {
-            font-size: 0.68rem;
-            font-weight: 700;
-            letter-spacing: 0.05em;
-            text-transform: uppercase;
-            padding: 3px 8px;
-            border-radius: 6px;
-            background: rgba(255, 255, 255, 0.08);
-            border: 1px solid rgba(255, 255, 255, 0.12);
-            color: #e0e0e0;
-        }
-
-        .rm-yt-reason {
-            font-size: 0.92rem;
-            line-height: 1.45;
-            color: #e2e2e2;
-            margin: 0;
-        }
-
-        .rm-yt-link {
-            color: #ffffff;
-            text-decoration: underline;
-            font-weight: 500;
-            cursor: pointer;
-            display: inline-block;
-            margin-top: 2px;
-            width: fit-content;
-        }
-
-        .rm-yt-link:hover {
-            color: #3ea6ff;
-        }
-
-        /* Barra de cuenta regresiva (solo visible si hay canciones en cola) */
-        .rm-yt-countdown-box {
-            display: none;
-            align-items: center;
-            gap: 10px;
-            margin-top: 14px;
-            padding: 10px 14px;
-            background: rgba(255, 255, 255, 0.04);
-            border: 1px solid rgba(255, 255, 255, 0.08);
-            border-radius: 12px;
-            width: fit-content;
-        }
-
-        .rm-yt-countdown-box.visible {
-            display: flex;
-        }
-
-        .rm-yt-spinner {
-            width: 18px;
-            height: 18px;
-            border: 2px solid rgba(255, 255, 255, 0.15);
-            border-top-color: #ff4e4e;
-            border-radius: 50%;
-            animation: spin 0.8s linear infinite;
+            animation: spin 0.75s cubic-bezier(0.4, 0, 0.2, 1) infinite;
         }
 
         @keyframes spin {
             to { transform: rotate(360deg); }
         }
 
-        .rm-yt-countdown-text {
-            font-size: 0.85rem;
-            color: #b0b0b0;
+        /* Overlay Minimalista Profesional */
+        .rm-error-overlay {
+            position: absolute;
+            inset: 0;
+            z-index: 99999;
+            background: #0e0e11;
+            display: none;
+            align-items: center;
+            justify-content: center;
+            padding: 24px;
+            animation: fadeIn 0.25s ease-out;
         }
 
-        .rm-yt-countdown-text strong {
-            color: #ff6b6b;
-            font-size: 0.95rem;
+        .rm-error-overlay.active {
+            display: flex;
         }
 
-        @media (max-width: 600px) {
-            .rm-yt-error-container {
-                flex-direction: column;
-                align-items: center;
-                text-align: center;
-                gap: 16px;
-            }
-            .rm-yt-header-row {
-                justify-content: center;
-            }
-            .rm-yt-countdown-box {
-                margin: 10px auto 0;
-                justify-content: center;
-            }
-            .rm-yt-link {
-                margin: 0 auto;
-            }
+        @keyframes fadeIn {
+            from { opacity: 0; transform: scale(0.99); }
+            to { opacity: 1; transform: scale(1); }
+        }
+
+        .rm-error-container {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            text-align: center;
+            max-width: 440px;
+            width: 100%;
+            gap: 12px;
+        }
+
+        .rm-error-icon-box {
+            width: 52px;
+            height: 52px;
+            border-radius: 50%;
+            background: rgba(255, 255, 255, 0.035);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: #888890;
+            margin-bottom: 2px;
+        }
+
+        .rm-error-icon-box svg {
+            width: 24px;
+            height: 24px;
+        }
+
+        .rm-error-badge {
+            font-size: 0.65rem;
+            font-weight: 700;
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+            padding: 3px 9px;
+            border-radius: 999px;
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            color: #a0a0a8;
+        }
+
+        .rm-error-title {
+            font-size: 1.15rem;
+            font-weight: 600;
+            color: #ffffff;
+            margin: 0;
+            letter-spacing: -0.01em;
+        }
+
+        .rm-error-reason {
+            font-size: 0.82rem;
+            line-height: 1.45;
+            color: #8c8c96;
+            margin: 0;
+            max-width: 360px;
+        }
+
+        /* Indicador de salto automático */
+        .rm-countdown-pill {
+            display: none;
+            align-items: center;
+            gap: 8px;
+            margin-top: 8px;
+            padding: 6px 14px;
+            background: rgba(255, 255, 255, 0.035);
+            border: 1px solid rgba(255, 255, 255, 0.07);
+            border-radius: 999px;
+            font-size: 0.78rem;
+            color: #b0b0b8;
+        }
+
+        .rm-countdown-pill.visible {
+            display: inline-flex;
+        }
+
+        .rm-pulse-dot {
+            width: 6px;
+            height: 6px;
+            border-radius: 50%;
+            background: #ff5252;
+            animation: pulse 1.5s ease-in-out infinite;
+        }
+
+        @keyframes pulse {
+            0% { transform: scale(0.95); opacity: 0.6; }
+            50% { transform: scale(1.3); opacity: 1; }
+            100% { transform: scale(0.95); opacity: 0.6; }
+        }
+
+        .rm-countdown-pill strong {
+            color: #ffffff;
+            font-weight: 600;
         }
     </style>
 </head>
 <body>
     <div id="playerHost">
-        <!-- Cortina inicial que oculta el iframe hasta que haya reproducción real -->
+        <!-- Cortina inicial que evita ver el reproductor nativo antes de tiempo -->
         <div id="rmCurtain" class="rm-loading-curtain">
             <div class="rm-curtain-spinner"></div>
         </div>
@@ -250,33 +222,25 @@
             </media-controls>
         </media-player>
 
-        <!-- Interfaz Única de Error Personalizada -->
-        <div id="rmErrorOverlay" class="rm-yt-error-overlay">
-            <div class="rm-yt-error-container">
-                <svg class="rm-yt-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
-                    <circle cx="12" cy="12" r="10"></circle>
-                    <line x1="12" y1="8" x2="12" y2="12"></line>
-                    <line x1="12" y1="16" x2="12.01" y2="16"></line>
-                </svg>
-                <div class="rm-yt-content">
-                    <div class="rm-yt-header-row">
-                        <h2 class="rm-yt-title" id="rmErrorTitle">Video no disponible</h2>
-                        <span class="rm-yt-code-tag" id="rmErrorCodeLabel">ERROR 150</span>
-                    </div>
-                    <p class="rm-yt-reason" id="rmErrorReason">
-                        Este video contiene restricciones de derechos de autor o el creador ha desactivado su reproducción en sitios externos.
-                    </p>
-                    <a class="rm-yt-link" id="rmWatchOnYoutube" href="#" target="_blank" rel="noopener noreferrer">
-                        Mirar en YouTube
-                    </a>
+        <!-- Overlay Minimalista de Error -->
+        <div id="rmErrorOverlay" class="rm-error-overlay">
+            <div class="rm-error-container">
+                <div class="rm-error-icon-box">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                        <circle cx="12" cy="12" r="10"></circle>
+                        <line x1="12" y1="8" x2="12" y2="12"></line>
+                        <line x1="12" y1="16" x2="12.01" y2="16"></line>
+                    </svg>
+                </div>
 
-                    <!-- Caja con contador (solo se muestra si hasNext === true) -->
-                    <div class="rm-yt-countdown-box" id="rmCountdownBox">
-                        <div class="rm-yt-spinner"></div>
-                        <span class="rm-yt-countdown-text">
-                            Saltando al próximo video en cola en <strong id="rmCountdownNumber">5</strong> s
-                        </span>
-                    </div>
+                <span class="rm-error-badge" id="rmErrorCodeLabel">Código 150</span>
+                <h2 class="rm-error-title" id="rmErrorTitle">Video no disponible</h2>
+                <p class="rm-error-reason" id="rmErrorReason">Restringido para reproducción externa por derechos de autor.</p>
+
+                <!-- Cuenta regresiva (visible solo si hay más pistas en cola) -->
+                <div class="rm-countdown-pill" id="rmCountdownBox">
+                    <div class="rm-pulse-dot"></div>
+                    <span>Siguiente pista en <strong id="rmCountdownNumber">5</strong>s</span>
                 </div>
             </div>
         </div>
@@ -290,12 +254,11 @@
         const player = document.getElementById('rmExternalPlayer');
         const curtain = document.getElementById('rmCurtain');
 
-        // Overlay Elements
+        // Elementos de la interfaz de error
         const errorOverlay = document.getElementById('rmErrorOverlay');
         const errorTitle = document.getElementById('rmErrorTitle');
         const errorCodeLabel = document.getElementById('rmErrorCodeLabel');
         const errorReason = document.getElementById('rmErrorReason');
-        const watchOnYoutube = document.getElementById('rmWatchOnYoutube');
         const countdownBox = document.getElementById('rmCountdownBox');
         const countdownNumber = document.getElementById('rmCountdownNumber');
 
@@ -310,35 +273,14 @@
         let hangWatchdogTimer = null;
         let playbackConfirmed = false;
 
-        const YT_ERROR_DICTIONARY = {
-            2: {
-                title: 'Parámetro no válido',
-                reason: 'El identificador de este video contiene un formato no válido.'
-            },
-            5: {
-                title: 'Error de reproducción HTML5',
-                reason: 'El reproductor HTML5 no puede procesar el contenido de este video.'
-            },
-            100: {
-                title: 'Video no disponible',
-                reason: 'El video ha sido eliminado o marcado como privado por su autor.'
-            },
-            101: {
-                title: 'Video no disponible',
-                reason: 'El titular de los derechos de autor ha bloqueado la reproducción de este video en sitios o aplicaciones externas.'
-            },
-            150: {
-                title: 'Video no disponible',
-                reason: 'Este video contiene restricciones de derechos de autor (LatinAutor / discográfica) y se ha bloqueado su inserción externa.'
-            },
-            153: {
-                title: 'Error de configuración del reproductor',
-                reason: 'YouTube rechazó la conexión por políticas de origen o cabecera Referer ausente.'
-            },
-            155: {
-                title: 'Restricción de seguridad',
-                reason: 'El entorno de ejecución bloqueó las directivas del reproductor de YouTube.'
-            }
+        const YT_ERRORS = {
+            2: { title: 'Parámetro no válido', reason: 'El formato del identificador de video no es compatible.' },
+            5: { title: 'Error HTML5', reason: 'El navegador no puede procesar el formato de este video.' },
+            100: { title: 'Video no disponible', reason: 'El contenido ha sido eliminado o marcado como privado.' },
+            101: { title: 'Inserción denegada', reason: 'El titular de los derechos no permite la reproducción externa.' },
+            150: { title: 'Video no disponible', reason: 'Restringido para reproducción externa por derechos de autor.' },
+            153: { title: 'Error de origen', reason: 'Restricción de cabecera o política de origen de YouTube.' },
+            155: { title: 'Bloqueo de seguridad', reason: 'El entorno de ejecución denegó la carga del reproductor.' }
         };
 
         function postToParent(m) {
@@ -377,7 +319,6 @@
             clearHangWatchdog();
             hangWatchdogTimer = setTimeout(function () {
                 if (!playbackConfirmed) {
-                    console.warn('[Vidstack] Tiempo de espera agotado. Activando pantalla de error.');
                     triggerCustomError(150);
                 }
             }, 4500);
@@ -386,20 +327,18 @@
         function triggerCustomError(code) {
             clearHangWatchdog();
             
-            // Ocultar iframe de YouTube inmediatamente
             player.classList.remove('vds-visible');
             curtain.classList.add('hidden');
 
             code = Number(code) || 150;
-            const errInfo = YT_ERROR_DICTIONARY[code] || {
+            const errInfo = YT_ERRORS[code] || {
                 title: 'Video no disponible',
-                reason: 'No se pudo reproducir este video debido a restricciones de la plataforma o derechos de autor.'
+                reason: 'No se pudo reproducir este video debido a restricciones de la plataforma.'
             };
 
             errorTitle.textContent = errInfo.title;
-            errorCodeLabel.textContent = 'ERROR ' + code;
+            errorCodeLabel.textContent = 'Código ' + code;
             errorReason.textContent = errInfo.reason;
-            watchOnYoutube.href = 'https://www.youtube.com/watch?v=' + encodeURIComponent(currentVid || '');
 
             errorOverlay.classList.add('active');
 
@@ -408,7 +347,6 @@
 
             if (countdownTimer) clearInterval(countdownTimer);
 
-            // SOLO activar cuenta regresiva si hay canciones en cola
             if (hasNextInQueue) {
                 countdownSec = 5;
                 countdownNumber.textContent = countdownSec;
@@ -424,7 +362,6 @@
                     }
                 }, 1000);
             } else {
-                // Si la cola está vacía, no mostrar contador ni saltar
                 countdownBox.classList.remove('visible');
             }
         }
@@ -435,13 +372,11 @@
             postToParent({ type: 'skip_fatal', videoId: currentVid });
         }
 
-        // --- INTERCEPCIÓN EN TIEMPO REAL DE POSTMESSAGE DE YOUTUBE ---
+        // Intercepción de mensajes internos de YouTube
         window.addEventListener('message', function (ev) {
             try {
                 let data = ev.data;
-                if (typeof data === 'string') {
-                    data = JSON.parse(data);
-                }
+                if (typeof data === 'string') data = JSON.parse(data);
                 if (data) {
                     if (data.event === 'onError' || [2, 5, 100, 101, 150, 153, 155].includes(Number(data.info))) {
                         const code = data.info || (data.data && data.data.code) || 150;
@@ -454,10 +389,8 @@
         function safePlay() {
             if (!player) return;
             try {
-                const playPromise = player.play();
-                if (playPromise !== undefined && typeof playPromise.catch === 'function') {
-                    playPromise.catch(function () {});
-                }
+                const p = player.play();
+                if (p && typeof p.catch === 'function') p.catch(function () {});
             } catch (e) {}
         }
 
