@@ -33,35 +33,69 @@
             color: #fff;
         }
 
-        #playerHost,
+        #playerHost {
+            width: 100% !important;
+            height: 100% !important;
+            position: relative;
+            background-color: #0f0f0f;
+            overflow: hidden;
+        }
+
         #rmExternalPlayer {
             width: 100% !important;
             height: 100% !important;
             max-width: none !important;
             margin: 0 !important;
-            position: relative;
+            position: absolute;
+            inset: 0;
+            opacity: 0; /* Oculto por defecto hasta confirmar reproducción limpia */
+            transition: opacity 0.25s ease-in;
         }
 
-        /* --- Overlay Profesional Estilo YouTube --- */
+        #rmExternalPlayer.vds-visible {
+            opacity: 1;
+        }
+
+        /* --- Cortina de Carga Preventiva (Evita destello del error nativo de YT) --- */
+        .rm-loading-curtain {
+            position: absolute;
+            inset: 0;
+            z-index: 50;
+            background-color: #0f0f0f;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: opacity 0.2s ease;
+        }
+
+        .rm-loading-curtain.hidden {
+            opacity: 0;
+            pointer-events: none;
+        }
+
+        .rm-curtain-spinner {
+            width: 34px;
+            height: 34px;
+            border: 3px solid rgba(255, 255, 255, 0.1);
+            border-top-color: #3ea6ff;
+            border-radius: 50%;
+            animation: spin 0.8s linear infinite;
+        }
+
+        /* --- Overlay Profesional Único de Error --- */
         .rm-yt-error-overlay {
             position: absolute;
             inset: 0;
-            z-index: 99999;
+            z-index: 999999;
             background: #181818;
             display: none;
             align-items: center;
             justify-content: center;
             padding: 24px;
-            animation: fadeIn 0.2s ease-out;
         }
 
         .rm-yt-error-overlay.active {
             display: flex;
-        }
-
-        @keyframes fadeIn {
-            from { opacity: 0; transform: scale(0.99); }
-            to { opacity: 1; transform: scale(1); }
         }
 
         .rm-yt-error-container {
@@ -136,7 +170,6 @@
             color: #3ea6ff;
         }
 
-        /* Barra de cuenta regresiva */
         .rm-yt-countdown-box {
             display: flex;
             align-items: center;
@@ -224,6 +257,11 @@
 </head>
 <body>
     <div id="playerHost">
+        <!-- Cortina inicial que oculta el iframe hasta que haya reproducción real -->
+        <div id="rmCurtain" class="rm-loading-curtain">
+            <div class="rm-curtain-spinner"></div>
+        </div>
+
         <media-player id="rmExternalPlayer" class="vds-player" load="eager" view-type="video" stream-type="on-demand" log-level="warn" crossorigin="" playsinline="" data-media-player="" tabindex="0" role="region" aria-label="Video Player" data-orientation="landscape">
             <media-provider></media-provider>
             <media-controls class="vds-controls" role="group" style="pointer-events: none;">
@@ -237,7 +275,7 @@
             </media-controls>
         </media-player>
 
-        <!-- Overlay Estilo Nativo YouTube de Bloqueo -->
+        <!-- Interfaz Única de Error (Cubre completamente cualquier error nativo) -->
         <div id="rmErrorOverlay" class="rm-yt-error-overlay">
             <div class="rm-yt-error-container">
                 <svg class="rm-yt-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
@@ -251,7 +289,7 @@
                         <span class="rm-yt-code-tag" id="rmErrorCodeLabel">ERROR 150</span>
                     </div>
                     <p class="rm-yt-reason" id="rmErrorReason">
-                        Este video contiene restricciones de derechos de autor o no está disponible para su reproducción externa.
+                        Este video contiene restricciones de derechos de autor o el creador ha desactivado su reproducción en sitios externos.
                     </p>
                     <a class="rm-yt-link" id="rmWatchOnYoutube" href="#" target="_blank" rel="noopener noreferrer">
                         Mirar en YouTube
@@ -277,6 +315,7 @@
         const autoplay = params.get('autoplay');
         const startTime = parseFloat(params.get('t')) || 0;
         const player = document.getElementById('rmExternalPlayer');
+        const curtain = document.getElementById('rmCurtain');
 
         // Overlay Elements
         const errorOverlay = document.getElementById('rmErrorOverlay');
@@ -295,7 +334,7 @@
         let endedReported = false;
         let reportedReady = false;
         let hangWatchdogTimer = null;
-        let hasStartedPlayback = false;
+        let playbackConfirmed = false;
 
         const YT_ERROR_DICTIONARY = {
             2: {
@@ -312,11 +351,11 @@
             },
             101: {
                 title: 'Video no disponible',
-                reason: 'El titular de los derechos de autor ha bloqueado la reproducción de este video en aplicaciones externas.'
+                reason: 'El titular de los derechos de autor ha bloqueado la reproducción de este video en sitios o aplicaciones externas.'
             },
             150: {
                 title: 'Video no disponible',
-                reason: 'Este video contiene restricciones de derechos de autor (LatinAutor / discográfica) y se ha bloqueado su inserción externa.'
+                reason: 'Este video contiene contenido con derechos de autor protegidos (LatinAutor / discográfica) y se ha bloqueado su inserción externa.'
             },
             153: {
                 title: 'Error de configuración del reproductor',
@@ -330,6 +369,18 @@
 
         function postToParent(m) {
             try { window.parent.postMessage(Object.assign({ source: 'x-player' }, m), '*'); } catch (e) {}
+        }
+
+        function showCurtain() {
+            playbackConfirmed = false;
+            curtain.classList.remove('hidden');
+            player.classList.remove('vds-visible');
+        }
+
+        function hideCurtain() {
+            playbackConfirmed = true;
+            curtain.classList.add('hidden');
+            player.classList.add('vds-visible');
         }
 
         function hideOverlay() {
@@ -347,20 +398,24 @@
             }
         }
 
-        // Si pasan 6 segundos y el video nunca avanza ni responde (pantalla negra silenciosa), se dispara el error
+        // Si pasan 4.5 segundos y el video nunca suena ni avanza, se bloquea y lanza el error
         function startHangWatchdog() {
             clearHangWatchdog();
-            hasStartedPlayback = false;
             hangWatchdogTimer = setTimeout(function () {
-                if (!hasStartedPlayback && (!player.currentTime || player.currentTime === 0)) {
-                    console.warn('[Vidstack] Detección de congelamiento/pantalla negra silenciosa en:', currentVid);
+                if (!playbackConfirmed) {
+                    console.warn('[Vidstack] Tiempo de espera agotado. Forzando error visual.');
                     triggerCustomError(150);
                 }
-            }, 6000);
+            }, 4500);
         }
 
         function triggerCustomError(code) {
             clearHangWatchdog();
+            
+            // Ocultar iframe de YouTube para que NUNCA se vea el cuadro nativo
+            player.classList.remove('vds-visible');
+            curtain.classList.add('hidden');
+
             code = Number(code) || 150;
             const errInfo = YT_ERROR_DICTIONARY[code] || {
                 title: 'Video no disponible',
@@ -402,16 +457,19 @@
             skipVideo();
         };
 
-        // --- INTERCEPCIÓN DIRECTA DE MENSAJES DE YOUTUBE ---
+        // --- INTERCEPCIÓN EN TIEMPO REAL DE POSTMESSAGE DE YOUTUBE ---
         window.addEventListener('message', function (ev) {
             try {
                 let data = ev.data;
                 if (typeof data === 'string') {
                     data = JSON.parse(data);
                 }
-                if (data && (data.event === 'onError' || data.info === 150 || data.info === 101 || data.info === 153 || data.info === 100 || data.info === 2 || data.info === 5)) {
-                    const code = data.info || (data.data && data.data.code) || 150;
-                    triggerCustomError(code);
+                if (data) {
+                    // Interceptar cualquier código de error interno de YouTube
+                    if (data.event === 'onError' || [2, 5, 100, 101, 150, 153, 155].includes(Number(data.info))) {
+                        const code = data.info || (data.data && data.data.code) || 150;
+                        triggerCustomError(code);
+                    }
                 }
             } catch (err) {}
         });
@@ -430,8 +488,10 @@
             if (autoplay !== '1') player.removeAttribute('autoplay');
 
             if (videoId) {
+                showCurtain();
                 player.src = 'youtube/' + videoId;
                 startHangWatchdog();
+
                 if (autoplay === '1') {
                     player.setAttribute('autoplay', '');
                     lastExpectedAutoplay = true;
@@ -445,25 +505,25 @@
                 }
             }
 
-            function onSuccessfulPlayback() {
-                hasStartedPlayback = true;
+            function onPlaybackSuccess() {
                 clearHangWatchdog();
                 hideOverlay();
+                hideCurtain();
                 if (!reportedReady) {
                     reportedReady = true;
                     postToParent({ type: 'ready' });
                 }
             }
 
-            player.addEventListener('can-play', onSuccessfulPlayback);
-            player.addEventListener('playing', onSuccessfulPlayback);
+            player.addEventListener('can-play', onPlaybackSuccess);
+            player.addEventListener('playing', onPlaybackSuccess);
             player.addEventListener('time-update', function () {
-                if (player.currentTime > 0.1) {
-                    onSuccessfulPlayback();
+                if (player.currentTime > 0.05) {
+                    onPlaybackSuccess();
                 }
             });
 
-            // Escucha de error desde Vidstack
+            // Captura de errores de Vidstack
             player.addEventListener('error', function (ev) {
                 const detail = ev.detail || ev;
                 let ytCode = 150;
@@ -549,6 +609,7 @@
                         case 'load':
                             if (data.videoId) {
                                 hideOverlay();
+                                showCurtain();
                                 clearHangWatchdog();
                                 currentVid = data.videoId;
                                 endedThisVideo = false;
@@ -592,6 +653,7 @@
                             break;
                         case 'stop':
                             hideOverlay();
+                            showCurtain();
                             clearHangWatchdog();
                             lastExpectedAutoplay = false;
                             try { player.pause(); } catch (e) {}
