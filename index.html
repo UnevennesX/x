@@ -59,7 +59,7 @@
             opacity: 1;
         }
 
-        /* Cortina protectora: impide ver cualquier error nativo de YouTube */
+        /* Cortina protectora para evitar cualquier destello nativo */
         .rm-curtain {
             position: absolute;
             inset: 0;
@@ -87,7 +87,7 @@
             to { transform: rotate(360deg); }
         }
 
-        /* Interfaz Idéntica al Reproductor Nativo de YouTube */
+        /* Interfaz de Error 100% Centrada */
         .rm-error-layer {
             position: absolute;
             inset: 0;
@@ -96,7 +96,7 @@
             display: none;
             align-items: center;
             justify-content: center;
-            padding: 32px 40px;
+            padding: 24px;
         }
 
         .rm-error-layer.active {
@@ -105,30 +105,34 @@
 
         .rm-yt-error-box {
             display: flex;
-            align-items: flex-start;
-            gap: 24px;
-            max-width: 680px;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            text-align: center;
+            max-width: 460px;
             width: 100%;
+            gap: 12px;
         }
 
-        /* Ícono nativo de YouTube (!) */
+        /* Ícono nativo centrado */
         .rm-yt-icon {
-            flex-shrink: 0;
-            width: 58px;
-            height: 58px;
+            width: 56px;
+            height: 56px;
             color: #888888;
+            margin-bottom: 2px;
         }
 
         .rm-yt-details {
-            flex: 1;
-            min-width: 0;
             display: flex;
             flex-direction: column;
+            align-items: center;
+            text-align: center;
             gap: 6px;
+            width: 100%;
         }
 
         .rm-yt-title {
-            font-size: 1.32rem;
+            font-size: 1.3rem;
             font-weight: 700;
             color: #f1f1f1;
             line-height: 1.25;
@@ -136,17 +140,18 @@
         }
 
         .rm-yt-reason {
-            font-size: 0.95rem;
+            font-size: 0.92rem;
             line-height: 1.45;
-            color: #e2e2e2;
+            color: #aaaaaa;
+            max-width: 360px;
         }
 
-        /* Texto de salto automático integrado al estilo nativo */
+        /* Mensaje de cuenta regresiva centrado */
         .rm-yt-countdown-msg {
             display: none;
-            margin-top: 10px;
-            font-size: 0.85rem;
-            color: #aaaaaa;
+            margin-top: 8px;
+            font-size: 0.84rem;
+            color: #888888;
             line-height: 1.4;
         }
 
@@ -161,14 +166,11 @@
 
         @media (max-width: 640px) {
             .rm-error-layer {
-                padding: 20px;
-            }
-            .rm-yt-error-box {
-                gap: 16px;
+                padding: 16px;
             }
             .rm-yt-icon {
-                width: 44px;
-                height: 44px;
+                width: 46px;
+                height: 46px;
             }
             .rm-yt-title {
                 font-size: 1.15rem;
@@ -181,7 +183,7 @@
 </head>
 <body>
     <div id="playerHost">
-        <!-- Cortina inicial -->
+        <!-- Cortina de carga -->
         <div id="rmCurtain" class="rm-curtain">
             <div class="rm-spinner"></div>
         </div>
@@ -199,7 +201,7 @@
             </media-controls>
         </media-player>
 
-        <!-- Pantalla de Error con el Diseño Nativo de YouTube -->
+        <!-- Pantalla de Error Centrada -->
         <div id="rmErrorOverlay" class="rm-error-layer">
             <div class="rm-yt-error-box">
                 <svg class="rm-yt-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
@@ -309,7 +311,7 @@
             clearHangWatchdog();
             isFatalError = true;
 
-            // Destruir visibilidad del iframe para que jamás se vea el error nativo
+            // Ocultar iframe de YouTube para que no destelle el error nativo
             player.classList.remove('vds-visible');
             curtain.classList.add('hidden');
 
