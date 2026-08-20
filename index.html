@@ -101,6 +101,8 @@
             let endedReported = false;
             let reportedReady = false;
             let loadFailed = false;
+            let reportedError = false;
+            const provider = player.querySelector('media-provider');
 
             if (autoplay !== '1') player.removeAttribute('autoplay');
 
@@ -128,12 +130,20 @@
             player.addEventListener('playing', markReady);
             setTimeout(markReady, 2500);
 
-            player.addEventListener('error', function (event) {
+            function reportError(event) {
+                if (reportedError) return;
+                reportedError = true;
                 loadFailed = true;
                 const detail = event && event.detail;
                 const message = detail && (detail.message || detail.error || detail.code);
                 postToParent({ type: 'error', videoId: currentVid, message: String(message || 'Video unavailable') });
-            });
+            }
+            player.addEventListener('error', reportError);
+            player.addEventListener('media-error', reportError);
+            if (provider) {
+                provider.addEventListener('error', reportError);
+                provider.addEventListener('media-error', reportError);
+            }
 
             player.addEventListener('ended', function () {
                 endedThisVideo = true;
@@ -212,6 +222,7 @@
                                 endedReported = false;
                                 reportedReady = false;
                                 loadFailed = false;
+                                reportedError = false;
                                 player.src = 'youtube/' + data.videoId;
 
                                 if (data.autoplay) {
