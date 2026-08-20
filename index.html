@@ -100,7 +100,6 @@
             let endedThisVideo = false;
             let endedReported = false;
             let reportedReady = false;
-            let loadFailed = false;
 
             if (autoplay !== '1') player.removeAttribute('autoplay');
 
@@ -120,7 +119,7 @@
             }
 
             function markReady() {
-                if (reportedReady || loadFailed) return;
+                if (reportedReady) return;
                 reportedReady = true;
                 postToParent({ type: 'ready' });
             }
@@ -128,11 +127,8 @@
             player.addEventListener('playing', markReady);
             setTimeout(markReady, 2500);
 
-            player.addEventListener('error', function (event) {
-                loadFailed = true;
-                const detail = event && event.detail;
-                const message = detail && (detail.message || detail.error || detail.code);
-                postToParent({ type: 'error', videoId: currentVid, message: String(message || 'Video unavailable') });
+            player.addEventListener('error', function () {
+                postToParent({ type: 'error' });
             });
 
             player.addEventListener('ended', function () {
@@ -210,8 +206,6 @@
                                 currentVid = data.videoId;
                                 endedThisVideo = false;
                                 endedReported = false;
-                                reportedReady = false;
-                                loadFailed = false;
                                 player.src = 'youtube/' + data.videoId;
 
                                 if (data.autoplay) {
