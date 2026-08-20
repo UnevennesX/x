@@ -136,7 +136,7 @@
             color: #3ea6ff;
         }
 
-        /* Barra de salto automático */
+        /* Barra de cuenta regresiva */
         .rm-yt-countdown-box {
             display: flex;
             align-items: center;
@@ -147,6 +147,7 @@
             border: 1px solid rgba(255, 255, 255, 0.08);
             border-radius: 12px;
             width: fit-content;
+            flex-wrap: wrap;
         }
 
         .rm-yt-spinner {
@@ -176,7 +177,6 @@
             display: flex;
             align-items: center;
             gap: 10px;
-            margin-top: 6px;
         }
 
         .rm-yt-btn {
@@ -211,6 +211,7 @@
             }
             .rm-yt-countdown-box {
                 margin: 10px auto 0;
+                justify-content: center;
             }
             .rm-yt-actions {
                 justify-content: center;
@@ -224,9 +225,7 @@
 <body>
     <div id="playerHost">
         <media-player id="rmExternalPlayer" class="vds-player" load="eager" view-type="video" stream-type="on-demand" log-level="warn" crossorigin="" playsinline="" data-media-player="" tabindex="0" role="region" aria-label="Video Player" data-orientation="landscape">
-            <media-provider keep-alive="" data-media-provider="">
-                <iframe tabindex="-1" data-no-controls="" class="vds-youtube" aria-hidden="true" frameborder="0" allow="autoplay; fullscreen; encrypted-media; picture-in-picture; accelerometer; gyroscope"></iframe>
-            </media-provider>
+            <media-provider></media-provider>
             <media-controls class="vds-controls" role="group" style="pointer-events: none;">
                 <media-controls-group class="vds-controls-group top-right" style="pointer-events: auto;">
                     <media-menu class="vds-menu" data-root="" data-disabled="" style="display: contents;">
@@ -252,7 +251,7 @@
                         <span class="rm-yt-code-tag" id="rmErrorCodeLabel">ERROR 150</span>
                     </div>
                     <p class="rm-yt-reason" id="rmErrorReason">
-                        Este video contiene restricciones de derechos de autor o el creador ha desactivado su reproducción en sitios externos.
+                        Este video contiene restricciones de derechos de autor o no está disponible para su reproducción externa.
                     </p>
                     <a class="rm-yt-link" id="rmWatchOnYoutube" href="#" target="_blank" rel="noopener noreferrer">
                         Mirar en YouTube
@@ -295,11 +294,13 @@
         let endedThisVideo = false;
         let endedReported = false;
         let reportedReady = false;
+        let hangWatchdogTimer = null;
+        let hasStartedPlayback = false;
 
         const YT_ERROR_DICTIONARY = {
             2: {
                 title: 'Parámetro no válido',
-                reason: 'El enlace o identificador de este video contiene un formato no válido.'
+                reason: 'El identificador de este video contiene un formato no válido.'
             },
             5: {
                 title: 'Error de reproducción HTML5',
@@ -311,11 +312,11 @@
             },
             101: {
                 title: 'Video no disponible',
-                reason: 'El titular de los derechos de autor ha bloqueado la reproducción de este video en sitios o aplicaciones externas.'
+                reason: 'El titular de los derechos de autor ha bloqueado la reproducción de este video en aplicaciones externas.'
             },
             150: {
                 title: 'Video no disponible',
-                reason: 'Este video contiene contenido con derechos de autor protegidos (LatinAutor / discográfica) y se ha bloqueado su inserción externa.'
+                reason: 'Este video contiene restricciones de derechos de autor (LatinAutor / discográfica) y se ha bloqueado su inserción externa.'
             },
             153: {
                 title: 'Error de configuración del reproductor',
@@ -339,7 +340,27 @@
             errorOverlay.classList.remove('active');
         }
 
+        function clearHangWatchdog() {
+            if (hangWatchdogTimer) {
+                clearTimeout(hangWatchdogTimer);
+                hangWatchdogTimer = null;
+            }
+        }
+
+        // Si pasan 6 segundos y el video nunca avanza ni responde (pantalla negra silenciosa), se dispara el error
+        function startHangWatchdog() {
+            clearHangWatchdog();
+            hasStartedPlayback = false;
+            hangWatchdogTimer = setTimeout(function () {
+                if (!hasStartedPlayback && (!player.currentTime || player.currentTime === 0)) {
+                    console.warn('[Vidstack] Detección de congelamiento/pantalla negra silenciosa en:', currentVid);
+                    triggerCustomError(150);
+                }
+            }, 6000);
+        }
+
         function triggerCustomError(code) {
+            clearHangWatchdog();
             code = Number(code) || 150;
             const errInfo = YT_ERROR_DICTIONARY[code] || {
                 title: 'Video no disponible',
@@ -355,7 +376,6 @@
             countdownNumber.textContent = countdownSec;
             errorOverlay.classList.add('active');
 
-            // Pausar y reportar error al padre
             try { player.pause(); } catch (e) {}
             postToParent({ type: 'error', code: code, videoId: currentVid });
 
@@ -374,6 +394,7 @@
 
         function skipVideo() {
             hideOverlay();
+            clearHangWatchdog();
             postToParent({ type: 'skip_fatal', videoId: currentVid });
         }
 
@@ -410,6 +431,7 @@
 
             if (videoId) {
                 player.src = 'youtube/' + videoId;
+                startHangWatchdog();
                 if (autoplay === '1') {
                     player.setAttribute('autoplay', '');
                     lastExpectedAutoplay = true;
@@ -423,22 +445,25 @@
                 }
             }
 
-            function markReady() {
-                if (reportedReady) return;
-                reportedReady = true;
-                postToParent({ type: 'ready' });
+            function onSuccessfulPlayback() {
+                hasStartedPlayback = true;
+                clearHangWatchdog();
+                hideOverlay();
+                if (!reportedReady) {
+                    reportedReady = true;
+                    postToParent({ type: 'ready' });
+                }
             }
-            player.addEventListener('can-play', function () {
-                hideOverlay();
-                markReady();
-            });
-            player.addEventListener('playing', function () {
-                hideOverlay();
-                markReady();
-            });
-            setTimeout(markReady, 2500);
 
-            // Escucha del evento de error de Vidstack
+            player.addEventListener('can-play', onSuccessfulPlayback);
+            player.addEventListener('playing', onSuccessfulPlayback);
+            player.addEventListener('time-update', function () {
+                if (player.currentTime > 0.1) {
+                    onSuccessfulPlayback();
+                }
+            });
+
+            // Escucha de error desde Vidstack
             player.addEventListener('error', function (ev) {
                 const detail = ev.detail || ev;
                 let ytCode = 150;
@@ -510,7 +535,7 @@
                     }
                 } catch (e) {}
 
-                if (lastExpectedAutoplay && player.paused) {
+                if (lastExpectedAutoplay && player.paused && !errorOverlay.classList.contains('active')) {
                     safePlay();
                 }
             }, 2500);
@@ -524,10 +549,12 @@
                         case 'load':
                             if (data.videoId) {
                                 hideOverlay();
+                                clearHangWatchdog();
                                 currentVid = data.videoId;
                                 endedThisVideo = false;
                                 endedReported = false;
                                 player.src = 'youtube/' + data.videoId;
+                                startHangWatchdog();
 
                                 if (data.autoplay) {
                                     player.setAttribute('autoplay', '');
@@ -565,6 +592,7 @@
                             break;
                         case 'stop':
                             hideOverlay();
+                            clearHangWatchdog();
                             lastExpectedAutoplay = false;
                             try { player.pause(); } catch (e) {}
                             player.currentTime = 0;
