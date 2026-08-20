@@ -56,7 +56,7 @@
             opacity: 1;
         }
 
-        /* Cortina inicial para no ver el reproductor nativo de YouTube */
+        /* Cortina inicial para evitar ver el reproductor nativo de YouTube */
         .rm-loading-curtain {
             position: absolute;
             inset: 0;
@@ -250,7 +250,7 @@
         let currentVid = videoId || null;
         let lastExpectedAutoplay = autoplay === '1';
         let hasNextInQueue = params.get('hasNext') === '1';
-        let isFatalError = false; // Bloqueo estricto de error para evitar que seek/play lo desmonte
+        let isFatalError = false;
         let endedThisVideo = false;
         let endedReported = false;
         let reportedReady = false;
@@ -258,13 +258,13 @@
         let playbackConfirmed = false;
 
         const YT_ERRORS = {
-            2: { title: 'Parámetro no válido', reason: 'El formato del identificador de video no es compatible.' },
-            5: { title: 'Error HTML5', reason: 'El navegador no puede procesar el formato de este video.' },
-            100: { title: 'Video no disponible', reason: 'El contenido ha sido eliminado o marcado como privado.' },
-            101: { title: 'Inserción bloqueada', reason: 'El titular de los derechos no permite la reproducción externa.' },
-            150: { title: 'Video no disponible', reason: 'Restringido para reproducción externa por derechos de autor.' },
-            153: { title: 'Error de origen', reason: 'Restricción de origen o políticas de seguridad de YouTube.' },
-            155: { title: 'Bloqueo de seguridad', reason: 'El entorno de ejecución denegó la carga del reproductor.' }
+            2: { title: 'Parámetro no válido', reason: 'El formato del video no es compatible.' },
+            5: { title: 'Error de reproducción', reason: 'No se puede procesar este contenido.' },
+            100: { title: 'Video no disponible', reason: 'El video ha sido eliminado o es privado.' },
+            101: { title: 'Video no disponible', reason: 'Restringido por derechos de autor.' },
+            150: { title: 'Video no disponible', reason: 'Restringido por derechos de autor.' },
+            153: { title: 'Video no disponible', reason: 'Restringido por derechos de autor.' },
+            155: { title: 'Video no disponible', reason: 'Restringido por derechos de autor.' }
         };
 
         function postToParent(m) {
@@ -330,14 +330,13 @@
             clearHangWatchdog();
             isFatalError = true;
             
-            // Ocultar iframe de YouTube
             player.classList.remove('vds-visible');
             curtain.classList.add('hidden');
 
             code = Number(code) || 150;
             const errInfo = YT_ERRORS[code] || {
                 title: 'Video no disponible',
-                reason: 'No se pudo reproducir este video debido a restricciones de la plataforma.'
+                reason: 'Restringido por derechos de autor.'
             };
 
             errorTitle.textContent = errInfo.title;
@@ -364,7 +363,6 @@
             postToParent({ type: 'skip_fatal', videoId: currentVid });
         }
 
-        // Intercepción directa de errores internos de YouTube
         window.addEventListener('message', function (ev) {
             try {
                 let data = ev.data;
@@ -478,7 +476,6 @@
             player.addEventListener('loadedmetadata', reportDuration);
             player.addEventListener('can-play', scheduleReportDuration);
 
-            // Verificador de auto-play y fin de pista
             setInterval(function () {
                 if (endedThisVideo || isFatalError || errorOverlay.classList.contains('active')) {
                     lastExpectedAutoplay = false;
@@ -509,7 +506,6 @@
                 try {
                     switch (data.type) {
                         case 'load':
-                            // Solo desmontamos el error si se carga una cancion distinta o nueva
                             if (data.videoId && data.videoId !== currentVid) {
                                 hideOverlay();
                                 showCurtain();
@@ -545,9 +541,7 @@
                             break;
 
                         case 'queue_state':
-                            // Actualización dinámica de cola
                             hasNextInQueue = !!data.hasNext;
-                            // Si está en pantalla de error y llega una nueva canción a la cola, arranca la cuenta atrás
                             if (isFatalError && hasNextInQueue && !countdownTimer) {
                                 startCountdown();
                             } else if (isFatalError && !hasNextInQueue && countdownTimer) {
