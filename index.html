@@ -3,6 +3,8 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <!-- Mitigación estricta para Error 153 de YouTube (Envío de Referer requerido) -->
+    <meta name="referrer" content="strict-origin-when-cross-origin">
     <title>Vidstack Player</title>
     <link rel="stylesheet" href="https://cdn.vidstack.io/player/theme.css">
     <link rel="stylesheet" href="https://cdn.vidstack.io/player/video.css">
@@ -15,6 +17,11 @@
     <link rel="preconnect" href="https://static.doubleclick.net" crossorigin="true">
 
     <style>
+        * {
+            box-sizing: border-box;
+            user-select: none;
+        }
+
         html, body {
             margin: 0;
             padding: 0;
@@ -22,6 +29,7 @@
             height: 100%;
             overflow: hidden;
             background-color: #000;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
         }
 
         #playerHost,
@@ -30,6 +38,142 @@
             height: 100% !important;
             max-width: none !important;
             margin: 0 !important;
+            position: relative;
+        }
+
+        /* --- Overlay de Error Personalizado --- */
+        .rm-error-overlay {
+            position: absolute;
+            inset: 0;
+            z-index: 999;
+            background: rgba(10, 10, 10, 0.94);
+            backdrop-filter: blur(10px);
+            display: none;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+            text-align: center;
+            color: #fff;
+            animation: fadeIn 0.25s ease-out;
+        }
+
+        .rm-error-overlay.active {
+            display: flex;
+        }
+
+        @keyframes fadeIn {
+            from { opacity: 0; transform: scale(0.98); }
+            to { opacity: 1; transform: scale(1); }
+        }
+
+        .rm-error-card {
+            background: rgba(255, 255, 255, 0.04);
+            border: 1px solid rgba(240, 62, 62, 0.35);
+            border-radius: 18px;
+            padding: 24px 28px;
+            max-width: 420px;
+            width: 90%;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            box-shadow: 0 16px 40px rgba(0, 0, 0, 0.6);
+        }
+
+        .rm-error-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            background: rgba(240, 62, 62, 0.15);
+            border: 1px solid rgba(240, 62, 62, 0.4);
+            color: #ff6b6b;
+            font-size: 0.72rem;
+            font-weight: 700;
+            letter-spacing: 0.06em;
+            text-transform: uppercase;
+            padding: 4px 10px;
+            border-radius: 999px;
+            margin-bottom: 12px;
+        }
+
+        .rm-error-title {
+            font-size: 1.05rem;
+            font-weight: 700;
+            color: #fff;
+            margin: 0 0 6px 0;
+            line-height: 1.3;
+        }
+
+        .rm-error-desc {
+            font-size: 0.82rem;
+            color: #b0b0b0;
+            margin: 0 0 16px 0;
+            line-height: 1.4;
+        }
+
+        .rm-error-timer-box {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+            font-size: 0.85rem;
+            color: #e0e0e0;
+            margin-bottom: 18px;
+            background: rgba(255, 255, 255, 0.05);
+            padding: 6px 14px;
+            border-radius: 10px;
+            border: 1px solid rgba(255, 255, 255, 0.08);
+        }
+
+        .rm-error-countdown {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            width: 24px;
+            height: 24px;
+            background: #ff6b6b;
+            color: #1a1a1a;
+            border-radius: 50%;
+            font-weight: 800;
+            font-size: 0.82rem;
+        }
+
+        .rm-error-actions {
+            display: flex;
+            gap: 10px;
+            width: 100%;
+        }
+
+        .rm-error-btn {
+            flex: 1;
+            padding: 9px 14px;
+            border-radius: 999px;
+            font-size: 0.75rem;
+            font-weight: 700;
+            letter-spacing: 0.04em;
+            text-transform: uppercase;
+            cursor: pointer;
+            border: 1px solid transparent;
+            transition: all 0.15s ease;
+        }
+
+        .rm-error-btn-skip {
+            background: #ffffff;
+            color: #121212;
+        }
+
+        .rm-error-btn-skip:hover {
+            background: #e0e0e0;
+        }
+
+        .rm-error-btn-retry {
+            background: rgba(255, 255, 255, 0.06);
+            border-color: rgba(255, 255, 255, 0.15);
+            color: #fff;
+        }
+
+        .rm-error-btn-retry:hover {
+            background: rgba(255, 255, 255, 0.12);
         }
     </style>
 </head>
@@ -45,7 +189,7 @@
                         <media-menu-button class="vds-menu-button vds-button" aria-label="Calidad de video" tabindex="0" role="button" id="media-menu-button-1" aria-haspopup="menu" aria-expanded="false" data-root="" aria-disabled="true" type="button">
                             <media-icon class="vds-icon" type="settings">
                                 <svg width="100%" height="100%" viewBox="0 0 32 32" fill="none" aria-hidden="true" focusable="false" xmlns="http://www.w3.org/2000/svg">
-                                    <path fill-rule="evenodd" clip-rule="evenodd" d="M13.5722 5.33333C13.2429 5.33333 12.9629 5.57382 12.9132 5.89938L12.4063 9.21916C12.4 9.26058 12.3746 9.29655 12.3378 9.31672C12.2387 9.37118 12.1409 9.42779 12.0444 9.48648C12.0086 9.5083 11.9646 9.51242 11.9255 9.49718L8.79572 8.27692C8.48896 8.15732 8.14083 8.27958 7.9762 8.56472L5.5491 12.7686C5.38444 13.0538 5.45271 13.4165 5.70981 13.6223L8.33308 15.7225C8.3658 15.7487 8.38422 15.7887 8.38331 15.8306C8.38209 15.8867 8.38148 15.9429 8.38148 15.9993C8.38148 16.0558 8.3821 16.1121 8.38332 16.1684C8.38423 16.2102 8.36582 16.2503 8.33313 16.2765L5.7103 18.3778C5.45334 18.5836 5.38515 18.9462 5.54978 19.2314L7.97688 23.4352C8.14155 23.7205 8.48981 23.8427 8.79661 23.723L11.926 22.5016C11.9651 22.4864 12.009 22.4905 12.0449 22.5123C12.1412 22.5709 12.2388 22.6274 12.3378 22.6818C12.3745 22.7019 12.4 22.7379 12.4063 22.7793L12.9132 26.0993C12.9629 26.4249 13.2429 26.6654 13.5722 26.6654H18.4264C18.7556 26.6654 19.0356 26.425 19.0854 26.0995L19.5933 22.7801C19.5997 22.7386 19.6252 22.7027 19.6619 22.6825C19.7614 22.6279 19.8596 22.5711 19.9564 22.5121C19.9923 22.4903 20.0362 22.4862 20.0754 22.5015L23.2035 23.7223C23.5103 23.842 23.8585 23.7198 24.0232 23.4346L26.4503 19.2307C26.6149 18.9456 26.5467 18.583 26.2898 18.3771L23.6679 16.2766C23.6352 16.2504 23.6168 16.2104 23.6177 16.1685C23.619 16.1122 23.6196 16.0558 23.6196 15.9993C23.6196 15.9429 23.619 15.8866 23.6177 15.8305C23.6168 15.7886 23.6353 15.7486 23.668 15.7224L26.2903 13.623C26.5474 13.4172 26.6156 13.0544 26.451 12.7692L24.0239 8.56537C23.8592 8.28023 23.5111 8.15797 23.2043 8.27757L20.0758 9.49734C20.0367 9.51258 19.9927 9.50846 19.9569 9.48664C19.8599 9.42762 19.7616 9.37071 19.6618 9.31596C19.6251 9.2958 19.5997 9.25984 19.5933 9.21843L19.0854 5.89915C19.0356 5.57369 18.7556 5.33333 18.4264 5.33333H13.5722ZM16.0001 20.2854C18.3672 20.2854 20.2862 18.3664 20.2862 15.9993C20.2862 13.6322 18.3672 11.7132 16.0001 11.7132C13.6329 11.7132 11.714 13.6322 11.714 15.9993C11.714 18.3664 13.6329 20.2854 16.0001 20.2854Z" fill="currentColor"></path>
+                                    <path fill-rule="evenodd" clip-rule="evenodd" d="M13.5722 5.33333C13.2429 5.33333 12.9629 5.57382 12.9132 5.89938L12.4063 9.21916C12.4 9.26058 12.3746 9.29655 12.3378 9.31672C12.2387 9.37118 12.1409 9.42779 12.0444 9.48648C12.0086 9.5083 11.9646 9.51242 11.9255 9.49718L8.79572 8.27692C8.48896 8.15732 8.14083 8.27958 7.9762 8.56472L5.5491 12.7686C5.38444 13.0538 5.45271 13.4165 5.70981 13.6223L8.33308 15.7225C8.3658 15.7487 8.38422 15.7887 8.38331 15.8306C8.38209 15.8867 8.38148 15.9429 8.38148 15.9993C8.38148 16.0558 8.3821 16.1121 8.38332 16.1684C8.38423 16.2102 8.36582 16.2503 8.33313 16.2765L5.7103 18.3778C5.45334 18.5836 5.38515 18.9462 5.54978 19.2314L7.97688 23.4352C8.14155 23.7205 8.48981 23.8427 8.79661 23.723L11.926 22.5016C11.9651 22.4864 12.009 22.4905 12.0449 22.5123C12.1412 22.5709 12.2388 22.6274 12.3378 22.6818C12.3745 22.7019 12.4 22.7379 12.4063 22.7793L12.9132 26.0993C12.9629 26.4249 13.2429 26.6654 13.5722 26.6654H18.4264C18.7556 26.6654 19.0356 26.425 19.0854 26.0995L19.5933 22.7801C19.5997 22.7386 19.6252 22.7027 19.6619 22.6825C19.7614 22.6279 19.8596 22.5711 19.9564 22.5121C19.9923 22.4903 20.0362 22.4862 20.0754 22.5015L23.2035 23.7223C23.5103 23.842 23.8585 23.7198 24.0232 23.4346L26.4503 19.2307C26.6149 18.9456 26.5467 18.583 26.2898 18.3771L23.6679 16.2766C23.6352 16.2504 23.6168 16.2104 23.6177 16.1685C23.619 16.1122 23.6196 16.0558 23.6196 15.9993C23.619 15.9429 23.619 15.8866 23.6177 15.8305C23.6168 15.7886 23.6353 15.7486 23.668 15.7224L26.2903 13.623C26.5474 13.4172 26.6156 13.0544 26.451 12.7692L24.0239 8.56537C23.8592 8.28023 23.5111 8.15797 23.2043 8.27757L20.0758 9.49734C20.0367 9.51258 19.9927 9.50846 19.9569 9.48664C19.8599 9.42762 19.7616 9.37071 19.6618 9.31596C19.6251 9.2958 19.5997 9.25984 19.5933 9.21843L19.0854 5.89915C19.0356 5.57369 18.7556 5.33333 18.4264 5.33333H13.5722ZM16.0001 20.2854C18.3672 20.2854 20.2862 18.3664 20.2862 15.9993C20.2862 13.6322 18.3672 11.7132 16.0001 11.7132C13.6329 11.7132 11.714 13.6322 11.714 15.9993C11.714 18.3664 13.6329 20.2854 16.0001 20.2854Z" fill="currentColor"></path>
                                 </svg>
                             </media-icon>
                         </media-menu-button>
@@ -69,6 +213,26 @@
                 </media-controls-group>
             </media-controls>
         </media-player>
+
+        <!-- Overlay de Error Personalizado -->
+        <div id="rmErrorOverlay" class="rm-error-overlay">
+            <div class="rm-error-card">
+                <div class="rm-error-badge">
+                    <svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-2h2v2zm0-4h-2V7h2v6z"/></svg>
+                    <span id="rmErrorCodeLabel">ERROR YT</span>
+                </div>
+                <h3 class="rm-error-title" id="rmErrorTitle">Video No Disponible</h3>
+                <p class="rm-error-desc" id="rmErrorDesc">Este contenido no puede reproducirse debido a restricciones del autor o de la plataforma.</p>
+                <div class="rm-error-timer-box">
+                    <span>Saltando a la siguiente canción en</span>
+                    <span class="rm-error-countdown" id="rmErrorCountdown">5</span>
+                </div>
+                <div class="rm-error-actions">
+                    <button class="rm-error-btn rm-error-btn-skip" id="rmErrorSkipBtn">Saltar Ahora</button>
+                    <button class="rm-error-btn rm-error-btn-retry" id="rmErrorRetryBtn">Reintentar</button>
+                </div>
+            </div>
+        </div>
     </div>
 
     <script>
@@ -78,29 +242,112 @@
         const startTime = parseFloat(params.get('t')) || 0;
         const player = document.getElementById('rmExternalPlayer');
 
+        // Overlay Elements
+        const errorOverlay = document.getElementById('rmErrorOverlay');
+        const errorCodeLabel = document.getElementById('rmErrorCodeLabel');
+        const errorTitle = document.getElementById('rmErrorTitle');
+        const errorDesc = document.getElementById('rmErrorDesc');
+        const errorCountdown = document.getElementById('rmErrorCountdown');
+        const errorSkipBtn = document.getElementById('rmErrorSkipBtn');
+        const errorRetryBtn = document.getElementById('rmErrorRetryBtn');
+
+        let countdownTimer = null;
+        let countdownValue = 5;
+        let currentVid = videoId || null;
+        let lastExpectedAutoplay = autoplay === '1';
+        let endedThisVideo = false;
+        let endedReported = false;
+        let reportedReady = false;
+
+        const YT_ERROR_MESSAGES = {
+            2: { title: 'Parámetro no válido', desc: 'El identificador del video tiene un formato incorrecto.' },
+            5: { title: 'Error de HTML5', desc: 'El reproductor HTML5 no puede procesar este video.' },
+            100: { title: 'Video no encontrado', desc: 'El video ha sido eliminado o marcado como privado.' },
+            101: { title: 'Inserción bloqueada', desc: 'El autor no permite reproducir este video fuera de YouTube.' },
+            150: { title: 'Restricción de inserción', desc: 'El contenido tiene derechos de autor que bloquean su reproducción externa.' },
+            153: { title: 'Error de configuración (153)', desc: 'YouTube bloqueó la solicitud por política de origen o falta de Referer.' },
+            155: { title: 'Restricción de seguridad', desc: 'El entorno de ejecución bloqueó el reproductor de YouTube.' }
+        };
+
         function postToParent(m) {
             try { window.parent.postMessage(Object.assign({ source: 'x-player' }, m), '*'); } catch (e) {}
         }
+
+        function hideErrorOverlay() {
+            if (countdownTimer) {
+                clearInterval(countdownTimer);
+                countdownTimer = null;
+            }
+            errorOverlay.classList.remove('active');
+        }
+
+        function triggerFatalError(code, rawDetails) {
+            code = Number(code) || 150;
+            const info = YT_ERROR_MESSAGES[code] || {
+                title: 'Error de Reproducción',
+                desc: 'No se pudo reproducir este video de YouTube (' + code + ').'
+            };
+
+            errorCodeLabel.textContent = 'ERROR YT ' + code;
+            errorTitle.textContent = info.title;
+            errorDesc.textContent = info.desc;
+
+            // Mostrar Overlay
+            errorOverlay.classList.add('active');
+            countdownValue = 5;
+            errorCountdown.textContent = countdownValue;
+
+            postToParent({
+                type: 'error',
+                code: code,
+                message: info.title,
+                videoId: currentVid
+            });
+
+            if (countdownTimer) clearInterval(countdownTimer);
+
+            countdownTimer = setInterval(function () {
+                countdownValue--;
+                errorCountdown.textContent = countdownValue;
+                if (countdownValue <= 0) {
+                    clearInterval(countdownTimer);
+                    countdownTimer = null;
+                    skipCurrentVideo();
+                }
+            }, 1000);
+        }
+
+        function skipCurrentVideo() {
+            hideErrorOverlay();
+            postToParent({
+                type: 'skip_fatal',
+                videoId: currentVid
+            });
+        }
+
+        errorSkipBtn.onclick = function () {
+            skipCurrentVideo();
+        };
+
+        errorRetryBtn.onclick = function () {
+            hideErrorOverlay();
+            if (currentVid) {
+                player.src = 'youtube/' + currentVid;
+                safePlay();
+            }
+        };
 
         function safePlay() {
             if (!player) return;
             try {
                 const playPromise = player.play();
                 if (playPromise !== undefined && typeof playPromise.catch === 'function') {
-                    playPromise.catch(function (err) {
-                        // Si falla por autoplay policy en móvil, silenciamos el error para no colgar el script
-                    });
+                    playPromise.catch(function () {});
                 }
             } catch (e) {}
         }
 
         if (player) {
-            let currentVid = videoId || null;
-            let lastExpectedAutoplay = autoplay === '1';
-            let endedThisVideo = false;
-            let endedReported = false;
-            let reportedReady = false;
-
             if (autoplay !== '1') player.removeAttribute('autoplay');
 
             if (videoId) {
@@ -123,12 +370,29 @@
                 reportedReady = true;
                 postToParent({ type: 'ready' });
             }
-            player.addEventListener('can-play', markReady);
-            player.addEventListener('playing', markReady);
+            player.addEventListener('can-play', function () {
+                hideErrorOverlay();
+                markReady();
+            });
+            player.addEventListener('playing', function () {
+                hideErrorOverlay();
+                markReady();
+            });
             setTimeout(markReady, 2500);
 
-            player.addEventListener('error', function () {
-                postToParent({ type: 'error' });
+            // Escucha de Errores de Vidstack y extracción del código de YouTube
+            player.addEventListener('error', function (ev) {
+                const detail = ev.detail || ev;
+                let ytCode = 150; // Fallback por defecto si no viene código
+
+                if (detail) {
+                    if (typeof detail.code === 'number') ytCode = detail.code;
+                    else if (typeof detail.data === 'number') ytCode = detail.data;
+                    else if (detail.cause && typeof detail.cause.data === 'number') ytCode = detail.cause.data;
+                    else if (detail.error && typeof detail.error.code === 'number') ytCode = detail.error.code;
+                }
+
+                triggerFatalError(ytCode, detail);
             });
 
             player.addEventListener('ended', function () {
@@ -174,7 +438,7 @@
 
             // Verificador de reproducción automática y finalización
             setInterval(function () {
-                if (endedThisVideo) {
+                if (endedThisVideo || errorOverlay.classList.contains('active')) {
                     lastExpectedAutoplay = false;
                     return;
                 }
@@ -203,6 +467,7 @@
                     switch (data.type) {
                         case 'load':
                             if (data.videoId) {
+                                hideErrorOverlay();
                                 currentVid = data.videoId;
                                 endedThisVideo = false;
                                 endedReported = false;
@@ -227,11 +492,11 @@
                                     }
                                 };
                                 player.addEventListener('can-play', onCanPlay);
-
                                 scheduleReportDuration();
                             }
                             break;
                         case 'play':
+                            hideErrorOverlay();
                             lastExpectedAutoplay = true;
                             safePlay();
                             break;
@@ -243,6 +508,7 @@
                             player.currentTime = Math.max(0, Number(data.time) || 0);
                             break;
                         case 'stop':
+                            hideErrorOverlay();
                             lastExpectedAutoplay = false;
                             try { player.pause(); } catch (e) {}
                             player.currentTime = 0;
