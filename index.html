@@ -236,6 +236,7 @@
         let reportedReady = false;
         let hangWatchdogTimer = null;
         let playbackConfirmed = false;
+        let errorGraceTimer = null;
 
         function postToParent(m) {
             try { window.parent.postMessage(Object.assign({ source: 'x-player' }, m), '*'); } catch (e) {}
@@ -254,6 +255,10 @@
         }
 
         function hideOverlay() {
+            if (errorGraceTimer) {
+                clearTimeout(errorGraceTimer);
+                errorGraceTimer = null;
+            }
             if (countdownTimer) {
                 clearInterval(countdownTimer);
                 countdownTimer = null;
@@ -273,10 +278,10 @@
         function startHangWatchdog() {
             clearHangWatchdog();
             hangWatchdogTimer = setTimeout(function () {
-                if (!playbackConfirmed && !isFatalError) {
+                if (!playbackConfirmed && !isFatalError && (!player || player.currentTime < 0.2)) {
                     triggerCustomError(150);
                 }
-            }, 4500);
+            }, 8000);
         }
 
         function startCountdown() {
@@ -297,13 +302,35 @@
         }
 
         function triggerCustomError(code) {
-            // YouTube/Vidstack puede emitir errores tardíos aunque el vídeo ya esté reproduciendo.
-            if (playbackConfirmed && !player.paused && player.currentTime > 0.5) return;
+            // Si el video ya está avanzando o reproduciéndose, ignorar el error
+            if (player && (playbackConfirmed || player.currentTime > 0.2 || !player.paused)) {
+                hideOverlay();
+                hideCurtain();
+                return;
+            }
+            if (errorGraceTimer) clearTimeout(errorGraceTimer);
+            errorGraceTimer = setTimeout(function () {
+                errorGraceTimer = null;
+                if (player && (playbackConfirmed || player.currentTime > 0.2 || !player.paused)) {
+                    hideOverlay();
+                    hideCurtain();
+                    return;
+                }
+                showCustomError(code);
+            }, 1500);
+        }
+
+        function showCustomError(code) {
+            // Si el video está activo, no mostrar error
+            if (player && (player.currentTime > 0.2 || (!player.paused && player.currentTime > 0))) {
+                hideOverlay();
+                hideCurtain();
+                return;
+            }
             if (isFatalError) return;
             clearHangWatchdog();
             isFatalError = true;
 
-            // Ocultar iframe de YouTube para evitar destellos
             player.classList.remove('vds-visible');
             curtain.classList.add('hidden');
 
@@ -331,12 +358,14 @@
             postToParent({ type: 'skip_fatal', videoId: currentVid });
         }
 
-        // Intercepción inmediata de eventos y mensajes de YouTube
+        // Intercepción de mensajes de YouTube
         window.addEventListener('message', function (ev) {
             try {
                 let data = ev.data;
                 if (typeof data === 'string') data = JSON.parse(data);
                 if (data && data.event === 'onError') {
+                    // Si ya está reproduciendo, descartar advertencias espurias
+                    if (player && player.currentTime > 0.2) return;
                     const code = data.info || (data.data && data.data.code) || 150;
                     triggerCustomError(code);
                 }
@@ -344,7 +373,7 @@
         });
 
         function safePlay() {
-            if (!player || isFatalError) return;
+            if (!player) return;
             try {
                 const p = player.play();
                 if (p && typeof p.catch === 'function') p.catch(function () {});
@@ -372,8 +401,8 @@
                 }
             }
 
+            // AUTO-RECUPERACIÓN: Si hay señal de reproducción, forzar limpieza de error
             function onPlaybackSuccess() {
-                if (isFatalError) return;
                 clearHangWatchdog();
                 hideOverlay();
                 hideCurtain();
@@ -386,12 +415,14 @@
             player.addEventListener('can-play', onPlaybackSuccess);
             player.addEventListener('playing', onPlaybackSuccess);
             player.addEventListener('time-update', function () {
-                if (player.currentTime > 0.05 && !isFatalError) {
+                // Si el tiempo avanza, desmantelar cualquier estado de error activo
+                if (player.currentTime > 0.05) {
                     onPlaybackSuccess();
                 }
             });
 
             player.addEventListener('error', function (ev) {
+                if (player && player.currentTime > 0.2) return;
                 const detail = ev.detail || ev;
                 let ytCode = 150;
                 if (detail) {
@@ -412,7 +443,7 @@
 
             function reportDuration() {
                 const d = player.duration;
-                if (d && isFinite(d) && d > 0 && !isFatalError) {
+                if (d && isFinite(d) && d > 0) {
                     postToParent({ type: 'duration', videoId: currentVid, duration: d });
                     return true;
                 }
@@ -445,7 +476,7 @@
 
             // Verificador de auto-play
             setInterval(function () {
-                if (endedThisVideo || isFatalError || errorOverlay.classList.contains('active')) {
+                if (endedThisVideo) {
                     lastExpectedAutoplay = false;
                     return;
                 }
@@ -462,7 +493,7 @@
                     }
                 } catch (e) {}
 
-                if (lastExpectedAutoplay && player.paused) {
+                if (lastExpectedAutoplay && player.paused && !isFatalError) {
                     safePlay();
                 }
             }, 2500);
@@ -520,21 +551,15 @@
                             break;
 
                         case 'play':
-                            if (!isFatalError) {
-                                lastExpectedAutoplay = true;
-                                safePlay();
-                            }
+                            lastExpectedAutoplay = true;
+                            safePlay();
                             break;
                         case 'pause':
-                            if (!isFatalError) {
-                                lastExpectedAutoplay = false;
-                                try { player.pause(); } catch (e) {}
-                            }
+                            lastExpectedAutoplay = false;
+                            try { player.pause(); } catch (e) {}
                             break;
                         case 'seek':
-                            if (!isFatalError) {
-                                player.currentTime = Math.max(0, Number(data.time) || 0);
-                            }
+                            player.currentTime = Math.max(0, Number(data.time) || 0);
                             break;
                         case 'stop':
                             hideOverlay();
