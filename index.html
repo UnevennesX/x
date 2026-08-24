@@ -41,7 +41,6 @@
             overflow: hidden;
         }
 
-        /* Oculto hasta confirmar que realmente reproduce */
         #rmExternalPlayer {
             width: 100% !important;
             height: 100% !important;
@@ -51,7 +50,7 @@
             inset: 0;
             visibility: hidden !important;
             opacity: 0;
-            transition: opacity 0.2s ease-in;
+            transition: opacity 0.15s ease-in;
         }
 
         #rmExternalPlayer.vds-visible {
@@ -68,10 +67,14 @@
             display: flex;
             align-items: center;
             justify-content: center;
+            transition: opacity 0.2s ease, visibility 0.2s ease;
         }
 
         .rm-curtain.hidden {
-            display: none;
+            display: none !important;
+            visibility: hidden !important;
+            opacity: 0 !important;
+            pointer-events: none !important;
         }
 
         .rm-spinner {
@@ -87,7 +90,7 @@
             to { transform: rotate(360deg); }
         }
 
-        /* Capa de Error Limpia (Cubre el cartel gris de YouTube) */
+        /* Capa de Error Limpia en Español */
         .rm-error-layer {
             position: absolute;
             inset: 0;
@@ -180,12 +183,10 @@
             <div class="rm-spinner"></div>
         </div>
 
-        <!-- Reproductor Vidstack -->
         <media-player id="rmExternalPlayer" class="vds-player" load="eager" view-type="video" stream-type="on-demand" log-level="warn" crossorigin="" playsinline="" data-media-player="" tabindex="0" role="region" aria-label="Video Player" data-orientation="landscape">
             <media-provider></media-provider>
         </media-player>
 
-        <!-- Capa de Error Limpia en Español -->
         <div id="rmErrorOverlay" class="rm-error-layer">
             <div class="rm-yt-error-box">
                 <svg class="rm-yt-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -231,7 +232,6 @@
         let reportedReady = false;
         let hangWatchdogTimer = null;
 
-        // Razón real del error según código de YouTube
         function getReadableErrorReason(code) {
             const num = Number(code);
             if (num === 2) return 'El enlace o ID del video no es válido.';
@@ -272,14 +272,13 @@
             }
         }
 
-        // Si tras 5 segundos no arranca nada, es un video colgado/bloqueado
         function startHangWatchdog() {
             clearHangWatchdog();
             hangWatchdogTimer = setTimeout(function () {
                 if (!playbackConfirmed && !isFatalError && (!player || player.currentTime < 0.1)) {
                     triggerFatalError(150);
                 }
-            }, 5000);
+            }, 6000);
         }
 
         function startCountdown() {
@@ -299,7 +298,6 @@
         }
 
         function triggerFatalError(code) {
-            // Si el video ya está reproduciendo de verdad, no bloquear
             if (playbackConfirmed && player && player.currentTime > 0.5 && !player.paused) {
                 return;
             }
@@ -308,7 +306,6 @@
             isFatalError = true;
             clearHangWatchdog();
 
-            // Ocultar de inmediato el iframe de YouTube para que no se filtre el cartel gris en inglés
             player.classList.remove('vds-visible');
             curtain.classList.add('hidden');
 
@@ -318,24 +315,40 @@
 
             try { player.pause(); } catch (e) {}
             postToParent({ type: 'error', code: Number(code) || 150, videoId: currentVid });
-
-            // Iniciar cuenta regresiva obligatoria de 5s para auto-saltar o detener la sala
             startCountdown();
         }
 
         function skipVideo() {
             hideErrorOverlay();
             clearHangWatchdog();
-            // Avisar a la sala que salte o detenga el reloj en 0:00
             postToParent({ type: 'skip_fatal', videoId: currentVid });
         }
 
-        // Intercepción inmediata de errores de YouTube
+        function onPlaybackSuccess() {
+            if (isFatalError) return;
+            clearHangWatchdog();
+            hideErrorOverlay();
+            hideCurtain();
+
+            if (!reportedReady) {
+                reportedReady = true;
+                postToParent({ type: 'ready' });
+            }
+        }
+
+        // Intercepción directa de eventos de YouTube IFrame
         window.addEventListener('message', function (ev) {
             try {
                 let data = ev.data;
                 if (typeof data === 'string') data = JSON.parse(data);
-                if (data && data.event === 'onError') {
+                if (!data) return;
+
+                // Si YouTube indica que está reproduciendo (state 1 = PLAYING) o avanzando tiempo
+                if (data.event === 'onStateChange' && (data.info === 1 || data.data === 1)) {
+                    onPlaybackSuccess();
+                } else if (data.event === 'infoDelivery' && data.info && (data.info.playerState === 1 || data.info.currentTime > 0.05)) {
+                    onPlaybackSuccess();
+                } else if (data.event === 'onError') {
                     const code = data.info || (data.data && data.data.code) || 150;
                     triggerFatalError(code);
                 }
@@ -371,25 +384,25 @@
                 }
             }
 
-            function onPlaybackSuccess() {
-                if (isFatalError) return;
-                clearHangWatchdog();
-                hideErrorOverlay();
-                hideCurtain();
+            // Eventos estándar y eventos de Vidstack
+            ['can-play', 'playing', 'play', 'vds-playing', 'vds-play'].forEach(function(evtName) {
+                player.addEventListener(evtName, onPlaybackSuccess);
+            });
 
-                if (!reportedReady) {
-                    reportedReady = true;
-                    postToParent({ type: 'ready' });
-                }
-            }
-
-            player.addEventListener('can-play', onPlaybackSuccess);
-            player.addEventListener('playing', onPlaybackSuccess);
             player.addEventListener('time-update', function () {
                 if (player.currentTime > 0.05 && !isFatalError) {
                     onPlaybackSuccess();
                 }
             });
+
+            // Sondeo de respaldo cada 300ms: Si hay tiempo o reproducción activa, ocultar cortina de inmediato
+            setInterval(function() {
+                if (!isFatalError && player) {
+                    if (player.currentTime > 0.05 || (!player.paused && player.currentTime > 0)) {
+                        onPlaybackSuccess();
+                    }
+                }
+            }, 300);
 
             player.addEventListener('error', function (ev) {
                 const detail = ev.detail || ev;
