@@ -200,7 +200,7 @@
                     <p class="rm-yt-reason" id="rmErrorReason">Este video tiene restricción de edad o inserción bloqueada.</p>
                     
                     <p class="rm-yt-countdown-msg" id="rmCountdownBox">
-                        Saltando video en <strong id="rmCountdownNumber">5</strong> s...
+                        Saltando a la siguiente canción en <strong id="rmCountdownNumber">3</strong> s...
                     </p>
                 </div>
             </div>
@@ -222,7 +222,7 @@
         const countdownNumber = document.getElementById('rmCountdownNumber');
 
         let countdownTimer = null;
-        let countdownSec = 5;
+        let countdownSec = 3;
         let currentVid = videoId || null;
         let lastExpectedAutoplay = autoplay === '1';
         let isFatalError = false;
@@ -283,7 +283,7 @@
 
         function startCountdown() {
             if (countdownTimer) clearInterval(countdownTimer);
-            countdownSec = 5;
+            countdownSec = 3;
             countdownNumber.textContent = countdownSec;
 
             countdownTimer = setInterval(function () {
@@ -332,8 +332,16 @@
 
             if (!reportedReady) {
                 reportedReady = true;
-                postToParent({ type: 'ready' });
+                postToParent({ type: 'ready', videoId: currentVid });
             }
+        }
+
+        function notifyEnded() {
+            if (endedReported) return;
+            endedThisVideo = true;
+            endedReported = true;
+            lastExpectedAutoplay = false;
+            postToParent({ type: 'ended', videoId: currentVid });
         }
 
         // Intercepción directa de eventos de YouTube IFrame
@@ -343,11 +351,18 @@
                 if (typeof data === 'string') data = JSON.parse(data);
                 if (!data) return;
 
-                // Si YouTube indica que está reproduciendo (state 1 = PLAYING) o avanzando tiempo
-                if (data.event === 'onStateChange' && (data.info === 1 || data.data === 1)) {
-                    onPlaybackSuccess();
-                } else if (data.event === 'infoDelivery' && data.info && (data.info.playerState === 1 || data.info.currentTime > 0.05)) {
-                    onPlaybackSuccess();
+                if (data.event === 'onStateChange') {
+                    if (data.info === 1 || data.data === 1) {
+                        onPlaybackSuccess();
+                    } else if (data.info === 0 || data.data === 0) {
+                        notifyEnded();
+                    }
+                } else if (data.event === 'infoDelivery' && data.info) {
+                    if (data.info.playerState === 1 || data.info.currentTime > 0.05) {
+                        onPlaybackSuccess();
+                    } else if (data.info.playerState === 0) {
+                        notifyEnded();
+                    }
                 } else if (data.event === 'onError') {
                     const code = data.info || (data.data && data.data.code) || 150;
                     triggerFatalError(code);
@@ -395,7 +410,6 @@
                 }
             });
 
-            // Sondeo de respaldo cada 300ms: Si hay tiempo o reproducción activa, ocultar cortina de inmediato
             setInterval(function() {
                 if (!isFatalError && player) {
                     if (player.currentTime > 0.05 || (!player.paused && player.currentTime > 0)) {
@@ -415,12 +429,8 @@
                 triggerFatalError(ytCode);
             });
 
-            player.addEventListener('ended', function () {
-                endedThisVideo = true;
-                if (!endedReported) {
-                    endedReported = true;
-                    postToParent({ type: 'ended', videoId: currentVid });
-                }
+            ['ended', 'vds-ended'].forEach(function(evtName) {
+                player.addEventListener(evtName, notifyEnded);
             });
 
             function reportDuration() {
@@ -456,7 +466,7 @@
             player.addEventListener('loadedmetadata', reportDuration);
             player.addEventListener('can-play', scheduleReportDuration);
 
-            // Verificador de auto-play
+            // Verificador de auto-avance al término
             setInterval(function () {
                 if (endedThisVideo || isFatalError) {
                     lastExpectedAutoplay = false;
@@ -464,13 +474,8 @@
                 }
 
                 try {
-                    if (player.duration && player.currentTime >= player.duration - 1) {
-                        endedThisVideo = true;
-                        if (!endedReported) {
-                            endedReported = true;
-                            postToParent({ type: 'ended', videoId: currentVid });
-                        }
-                        lastExpectedAutoplay = false;
+                    if (player.duration && player.duration > 0 && player.currentTime >= player.duration - 0.4) {
+                        notifyEnded();
                         return;
                     }
                 } catch (e) {}
@@ -478,7 +483,7 @@
                 if (lastExpectedAutoplay && player.paused && !isFatalError) {
                     safePlay();
                 }
-            }, 2500);
+            }, 1000);
 
             // Mensajes recibidos desde room-music.js
             window.addEventListener('message', function (ev) {
@@ -487,13 +492,14 @@
                 try {
                     switch (data.type) {
                         case 'load':
-                            if (data.videoId && data.videoId !== currentVid) {
+                            if (data.videoId) {
                                 hideErrorOverlay();
                                 showCurtain();
                                 clearHangWatchdog();
                                 currentVid = data.videoId;
                                 endedThisVideo = false;
                                 endedReported = false;
+                                reportedReady = false;
                                 player.src = 'youtube/' + data.videoId;
                                 startHangWatchdog();
 
@@ -553,6 +559,8 @@
                             break;
                         case 'setVolume':
                             player.volume = Math.max(0, Math.min(1, (Number(data.volume) || 0) / 100));
+                            break;
+                        case 'queue_state':
                             break;
                     }
                 } catch (e) {}
