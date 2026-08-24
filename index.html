@@ -86,7 +86,7 @@
             to { transform: rotate(360deg); }
         }
 
-        /* Capa elegante para videos restringidos que SÍ suenan (Modo Solo Audio) */
+        /* Capa elegante: Modo Solo Audio (cuando el video está restringido visualmente pero suena) */
         .rm-audio-layer {
             position: absolute;
             inset: 0;
@@ -145,7 +145,7 @@
             line-height: 1.4;
         }
 
-        /* Capa de Error Fatal (cuando NO se ve ni se escucha) */
+        /* Capa de Error Limpia (cuando no hay audio ni video) */
         .rm-error-layer {
             position: absolute;
             inset: 0;
@@ -173,9 +173,9 @@
         }
 
         .rm-yt-icon {
-            width: 56px;
-            height: 56px;
-            color: #888888;
+            width: 54px;
+            height: 54px;
+            color: #777777;
             margin-bottom: 2px;
         }
 
@@ -189,7 +189,7 @@
         }
 
         .rm-yt-title {
-            font-size: 1.3rem;
+            font-size: 1.25rem;
             font-weight: 700;
             color: #f1f1f1;
             line-height: 1.25;
@@ -197,7 +197,7 @@
         }
 
         .rm-yt-reason {
-            font-size: 0.92rem;
+            font-size: 0.9rem;
             line-height: 1.45;
             color: #aaaaaa;
             max-width: 360px;
@@ -248,7 +248,7 @@
             <media-provider></media-provider>
         </media-player>
 
-        <!-- Capa Elegante: Modo Solo Audio (+18 que sí suena) -->
+        <!-- Capa Elegante: Modo Solo Audio (+18 o video bloqueado que sí suena) -->
         <div id="rmAudioOnlyOverlay" class="rm-audio-layer">
             <div class="rm-equalizer">
                 <div class="rm-eq-bar"></div>
@@ -261,7 +261,7 @@
             <p class="rm-audio-sub">Contenido con restricción visual de YouTube.</p>
         </div>
 
-        <!-- Capa de Error Fatal: No suena nada / Bloqueo total -->
+        <!-- Capa de Error Limpia: No suena nada / Bloqueo total -->
         <div id="rmErrorOverlay" class="rm-error-layer">
             <div class="rm-yt-error-box">
                 <svg class="rm-yt-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
@@ -272,7 +272,7 @@
 
                 <div class="rm-yt-details">
                     <h2 class="rm-yt-title" id="rmErrorTitle">Video no disponible</h2>
-                    <p class="rm-yt-reason" id="rmErrorReason">Restringido por derechos de autor.</p>
+                    <p class="rm-yt-reason" id="rmErrorReason">Este video no se puede reproducir en reproductores integrados.</p>
                     
                     <p class="rm-yt-countdown-msg" id="rmCountdownBox">
                         Pasando al siguiente video en <strong id="rmCountdownNumber">5</strong> s...
@@ -311,6 +311,15 @@
         let hangWatchdogTimer = null;
         let errorGraceTimer = null;
 
+        // Mapeo dinámico y exacto de errores según el código de YouTube
+        function getReadableErrorReason(code) {
+            const num = Number(code);
+            if (num === 2) return 'El identificador del video no es válido.';
+            if (num === 100) return 'El video fue eliminado o está configurado como privado.';
+            if (num === 101 || num === 150) return 'Este video tiene restricción de inserción o edad.';
+            return 'No se pudo reproducir este video en la sala.';
+        }
+
         function postToParent(m) {
             try { window.parent.postMessage(Object.assign({ source: 'x-player' }, m), '*'); } catch (e) {}
         }
@@ -342,7 +351,9 @@
         function enableAudioOnlyView() {
             isAudioOnlyMode = true;
             hideAllOverlays();
-            hideCurtain();
+            // Ocultamos el iframe de YouTube para que no se vea el aviso nativo en inglés
+            player.classList.remove('vds-visible');
+            curtain.classList.add('hidden');
             audioOnlyOverlay.classList.add('active');
         }
 
@@ -360,12 +371,11 @@
 
         function startHangWatchdog() {
             clearHangWatchdog();
-            // 7 segundos de tolerancia inicial
             hangWatchdogTimer = setTimeout(function () {
                 if (!isFatalError && (!player || player.currentTime < 0.2)) {
                     evaluateErrorState(150);
                 }
-            }, 7000);
+            }, 6000);
         }
 
         function startCountdown() {
@@ -385,17 +395,19 @@
             }, 1000);
         }
 
-        // Evaluación inteligente: ¿Suena o es fallo total?
+        // Evaluación de estado: Si hay audio, entra a Modo Audio; si no, declara error fatal
         function evaluateErrorState(code) {
             ytReportedError = true;
 
-            // Si el audio ya está corriendo, entrar directamente a Modo Solo Audio
+            // Inmediatamente ocultar el iframe para que YouTube no muestre su texto en inglés
+            player.classList.remove('vds-visible');
+
+            // Si el audio ya está activo, mostrar Modo Solo Audio
             if (player && (player.currentTime > 0.2 || !player.paused)) {
                 enableAudioOnlyView();
                 return;
             }
 
-            // Esperar 2.5s para confirmar si arranca el audio tras el aviso de YouTube
             if (errorGraceTimer) clearTimeout(errorGraceTimer);
             errorGraceTimer = setTimeout(function () {
                 errorGraceTimer = null;
@@ -404,7 +416,7 @@
                 } else {
                     triggerFatalError(code);
                 }
-            }, 2500);
+            }, 2000);
         }
 
         function triggerFatalError(code) {
@@ -421,7 +433,7 @@
             curtain.classList.add('hidden');
 
             errorTitle.textContent = 'Video no disponible';
-            errorReason.textContent = 'Restringido por derechos de autor o país.';
+            errorReason.textContent = getReadableErrorReason(code);
             errorOverlay.classList.add('active');
 
             try { player.pause(); } catch (e) {}
@@ -445,7 +457,7 @@
             postToParent({ type: 'skip_fatal', videoId: currentVid });
         }
 
-        // Intercepción de mensajes del IFrame de YouTube
+        // Intercepción inmediata de mensajes de error de YouTube
         window.addEventListener('message', function (ev) {
             try {
                 let data = ev.data;
@@ -490,7 +502,7 @@
                 clearHangWatchdog();
                 hideAllOverlays();
 
-                // Si YouTube reportó restricción pero suena, mostramos Modo Solo Audio
+                // Si YouTube reportó restricción pero el audio corre, activar Modo Audio
                 if (ytReportedError) {
                     enableAudioOnlyView();
                 } else {
@@ -507,7 +519,6 @@
             player.addEventListener('can-play', onPlaybackSuccess);
             player.addEventListener('playing', onPlaybackSuccess);
             player.addEventListener('time-update', function () {
-                // Si el tiempo avanza, confirmamos que el audio está vivo
                 if (player.currentTime > 0.05) {
                     onPlaybackSuccess();
                 }
