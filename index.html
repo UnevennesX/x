@@ -41,6 +41,7 @@
             overflow: hidden;
         }
 
+        /* Oculto hasta confirmar que realmente reproduce */
         #rmExternalPlayer {
             width: 100% !important;
             height: 100% !important;
@@ -86,66 +87,7 @@
             to { transform: rotate(360deg); }
         }
 
-        /* Capa elegante: Modo Solo Audio (cuando el video está restringido visualmente pero suena) */
-        .rm-audio-layer {
-            position: absolute;
-            inset: 0;
-            z-index: 999;
-            background: radial-gradient(circle at center, #1e1e1e 0%, #0d0d0d 100%);
-            display: none;
-            flex-direction: column;
-            align-items: center;
-            justify-content: center;
-            padding: 24px;
-            text-align: center;
-            gap: 14px;
-        }
-
-        .rm-audio-layer.active {
-            display: flex;
-        }
-
-        .rm-equalizer {
-            display: flex;
-            align-items: flex-end;
-            gap: 5px;
-            height: 36px;
-            margin-bottom: 4px;
-        }
-
-        .rm-eq-bar {
-            width: 5px;
-            background: var(--accent-primary, #4c6ef5);
-            border-radius: 3px;
-            animation: equalize 1.2s ease-in-out infinite alternate;
-        }
-
-        .rm-eq-bar:nth-child(1) { height: 14px; animation-delay: 0.1s; }
-        .rm-eq-bar:nth-child(2) { height: 28px; animation-delay: 0.3s; }
-        .rm-eq-bar:nth-child(3) { height: 36px; animation-delay: 0.2s; }
-        .rm-eq-bar:nth-child(4) { height: 22px; animation-delay: 0.4s; }
-        .rm-eq-bar:nth-child(5) { height: 16px; animation-delay: 0.15s; }
-
-        @keyframes equalize {
-            0% { transform: scaleY(0.3); }
-            100% { transform: scaleY(1); }
-        }
-
-        .rm-audio-title {
-            font-size: 1.15rem;
-            font-weight: 700;
-            color: #f1f1f1;
-            letter-spacing: -0.01em;
-        }
-
-        .rm-audio-sub {
-            font-size: 0.85rem;
-            color: #999999;
-            max-width: 320px;
-            line-height: 1.4;
-        }
-
-        /* Capa de Error Limpia (cuando no hay audio ni video) */
+        /* Capa de Error Limpia (Cubre el cartel gris de YouTube) */
         .rm-error-layer {
             position: absolute;
             inset: 0;
@@ -169,13 +111,13 @@
             text-align: center;
             max-width: 460px;
             width: 100%;
-            gap: 12px;
+            gap: 14px;
         }
 
         .rm-yt-icon {
-            width: 54px;
-            height: 54px;
-            color: #777777;
+            width: 52px;
+            height: 52px;
+            color: #e03131;
             margin-bottom: 2px;
         }
 
@@ -197,41 +139,36 @@
         }
 
         .rm-yt-reason {
-            font-size: 0.9rem;
+            font-size: 0.88rem;
             line-height: 1.45;
             color: #aaaaaa;
             max-width: 360px;
         }
 
         .rm-yt-countdown-msg {
-            display: none;
-            margin-top: 8px;
+            margin-top: 10px;
             font-size: 0.84rem;
             color: #888888;
             line-height: 1.4;
         }
 
-        .rm-yt-countdown-msg.visible {
-            display: block;
-        }
-
         .rm-yt-countdown-msg strong {
             color: #f1f1f1;
-            font-weight: 600;
+            font-weight: 700;
         }
 
         @media (max-width: 640px) {
-            .rm-error-layer, .rm-audio-layer {
+            .rm-error-layer {
                 padding: 16px;
             }
             .rm-yt-icon {
-                width: 46px;
-                height: 46px;
+                width: 44px;
+                height: 44px;
             }
             .rm-yt-title {
-                font-size: 1.15rem;
+                font-size: 1.1rem;
             }
-            .rm-yt-reason, .rm-audio-sub {
+            .rm-yt-reason {
                 font-size: 0.82rem;
             }
         }
@@ -248,23 +185,10 @@
             <media-provider></media-provider>
         </media-player>
 
-        <!-- Capa Elegante: Modo Solo Audio (+18 o video bloqueado que sí suena) -->
-        <div id="rmAudioOnlyOverlay" class="rm-audio-layer">
-            <div class="rm-equalizer">
-                <div class="rm-eq-bar"></div>
-                <div class="rm-eq-bar"></div>
-                <div class="rm-eq-bar"></div>
-                <div class="rm-eq-bar"></div>
-                <div class="rm-eq-bar"></div>
-            </div>
-            <h2 class="rm-audio-title">Reproduciendo Audio</h2>
-            <p class="rm-audio-sub">Contenido con restricción visual de YouTube.</p>
-        </div>
-
-        <!-- Capa de Error Limpia: No suena nada / Bloqueo total -->
+        <!-- Capa de Error Limpia en Español -->
         <div id="rmErrorOverlay" class="rm-error-layer">
             <div class="rm-yt-error-box">
-                <svg class="rm-yt-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                <svg class="rm-yt-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                     <circle cx="12" cy="12" r="10"></circle>
                     <line x1="12" y1="8" x2="12" y2="12"></line>
                     <line x1="12" y1="16" x2="12.01" y2="16"></line>
@@ -272,10 +196,10 @@
 
                 <div class="rm-yt-details">
                     <h2 class="rm-yt-title" id="rmErrorTitle">Video no disponible</h2>
-                    <p class="rm-yt-reason" id="rmErrorReason">Este video no se puede reproducir en reproductores integrados.</p>
+                    <p class="rm-yt-reason" id="rmErrorReason">Este video tiene restricción de edad o inserción bloqueada.</p>
                     
                     <p class="rm-yt-countdown-msg" id="rmCountdownBox">
-                        Pasando al siguiente video en <strong id="rmCountdownNumber">5</strong> s...
+                        Saltando video en <strong id="rmCountdownNumber">5</strong> s...
                     </p>
                 </div>
             </div>
@@ -290,7 +214,6 @@
         const player = document.getElementById('rmExternalPlayer');
         const curtain = document.getElementById('rmCurtain');
 
-        const audioOnlyOverlay = document.getElementById('rmAudioOnlyOverlay');
         const errorOverlay = document.getElementById('rmErrorOverlay');
         const errorTitle = document.getElementById('rmErrorTitle');
         const errorReason = document.getElementById('rmErrorReason');
@@ -301,22 +224,19 @@
         let countdownSec = 5;
         let currentVid = videoId || null;
         let lastExpectedAutoplay = autoplay === '1';
-        let hasNextInQueue = params.get('hasNext') === '1';
         let isFatalError = false;
-        let isAudioOnlyMode = false;
-        let ytReportedError = false;
+        let playbackConfirmed = false;
         let endedThisVideo = false;
         let endedReported = false;
         let reportedReady = false;
         let hangWatchdogTimer = null;
-        let errorGraceTimer = null;
 
-        // Mapeo dinámico y exacto de errores según el código de YouTube
+        // Razón real del error según código de YouTube
         function getReadableErrorReason(code) {
             const num = Number(code);
-            if (num === 2) return 'El identificador del video no es válido.';
-            if (num === 100) return 'El video fue eliminado o está configurado como privado.';
-            if (num === 101 || num === 150) return 'Este video tiene restricción de inserción o edad.';
+            if (num === 2) return 'El enlace o ID del video no es válido.';
+            if (num === 100) return 'El video fue eliminado o es privado.';
+            if (num === 101 || num === 150) return 'Este video tiene restricción de edad (+18) o inserción bloqueada.';
             return 'No se pudo reproducir este video en la sala.';
         }
 
@@ -325,41 +245,24 @@
         }
 
         function showCurtain() {
+            playbackConfirmed = false;
             curtain.classList.remove('hidden');
             player.classList.remove('vds-visible');
         }
 
         function hideCurtain() {
+            playbackConfirmed = true;
             curtain.classList.add('hidden');
             player.classList.add('vds-visible');
         }
 
-        function hideAllOverlays() {
-            if (errorGraceTimer) {
-                clearTimeout(errorGraceTimer);
-                errorGraceTimer = null;
-            }
+        function hideErrorOverlay() {
             if (countdownTimer) {
                 clearInterval(countdownTimer);
                 countdownTimer = null;
             }
             isFatalError = false;
             errorOverlay.classList.remove('active');
-            countdownBox.classList.remove('visible');
-        }
-
-        function enableAudioOnlyView() {
-            isAudioOnlyMode = true;
-            hideAllOverlays();
-            // Ocultamos el iframe de YouTube para que no se vea el aviso nativo en inglés
-            player.classList.remove('vds-visible');
-            curtain.classList.add('hidden');
-            audioOnlyOverlay.classList.add('active');
-        }
-
-        function disableAudioOnlyView() {
-            isAudioOnlyMode = false;
-            audioOnlyOverlay.classList.remove('active');
         }
 
         function clearHangWatchdog() {
@@ -369,20 +272,20 @@
             }
         }
 
+        // Si tras 5 segundos no arranca nada, es un video colgado/bloqueado
         function startHangWatchdog() {
             clearHangWatchdog();
             hangWatchdogTimer = setTimeout(function () {
-                if (!isFatalError && (!player || player.currentTime < 0.2)) {
-                    evaluateErrorState(150);
+                if (!playbackConfirmed && !isFatalError && (!player || player.currentTime < 0.1)) {
+                    triggerFatalError(150);
                 }
-            }, 6000);
+            }, 5000);
         }
 
         function startCountdown() {
             if (countdownTimer) clearInterval(countdownTimer);
             countdownSec = 5;
             countdownNumber.textContent = countdownSec;
-            countdownBox.classList.add('visible');
 
             countdownTimer = setInterval(function () {
                 countdownSec--;
@@ -395,40 +298,17 @@
             }, 1000);
         }
 
-        // Evaluación de estado: Si hay audio, entra a Modo Audio; si no, declara error fatal
-        function evaluateErrorState(code) {
-            ytReportedError = true;
-
-            // Inmediatamente ocultar el iframe para que YouTube no muestre su texto en inglés
-            player.classList.remove('vds-visible');
-
-            // Si el audio ya está activo, mostrar Modo Solo Audio
-            if (player && (player.currentTime > 0.2 || !player.paused)) {
-                enableAudioOnlyView();
-                return;
-            }
-
-            if (errorGraceTimer) clearTimeout(errorGraceTimer);
-            errorGraceTimer = setTimeout(function () {
-                errorGraceTimer = null;
-                if (player && (player.currentTime > 0.2 || (!player.paused && player.currentTime > 0))) {
-                    enableAudioOnlyView();
-                } else {
-                    triggerFatalError(code);
-                }
-            }, 2000);
-        }
-
         function triggerFatalError(code) {
-            if (player && player.currentTime > 0.2) {
-                enableAudioOnlyView();
+            // Si el video ya está reproduciendo de verdad, no bloquear
+            if (playbackConfirmed && player && player.currentTime > 0.5 && !player.paused) {
                 return;
             }
-            if (isFatalError) return;
-            clearHangWatchdog();
-            isFatalError = true;
 
-            disableAudioOnlyView();
+            if (isFatalError) return;
+            isFatalError = true;
+            clearHangWatchdog();
+
+            // Ocultar de inmediato el iframe de YouTube para que no se filtre el cartel gris en inglés
             player.classList.remove('vds-visible');
             curtain.classList.add('hidden');
 
@@ -439,32 +319,25 @@
             try { player.pause(); } catch (e) {}
             postToParent({ type: 'error', code: Number(code) || 150, videoId: currentVid });
 
-            if (hasNextInQueue) {
-                startCountdown();
-            } else {
-                if (countdownTimer) {
-                    clearInterval(countdownTimer);
-                    countdownTimer = null;
-                }
-                countdownBox.classList.remove('visible');
-            }
+            // Iniciar cuenta regresiva obligatoria de 5s para auto-saltar o detener la sala
+            startCountdown();
         }
 
         function skipVideo() {
-            hideAllOverlays();
-            disableAudioOnlyView();
+            hideErrorOverlay();
             clearHangWatchdog();
+            // Avisar a la sala que salte o detenga el reloj en 0:00
             postToParent({ type: 'skip_fatal', videoId: currentVid });
         }
 
-        // Intercepción inmediata de mensajes de error de YouTube
+        // Intercepción inmediata de errores de YouTube
         window.addEventListener('message', function (ev) {
             try {
                 let data = ev.data;
                 if (typeof data === 'string') data = JSON.parse(data);
                 if (data && data.event === 'onError') {
                     const code = data.info || (data.data && data.data.code) || 150;
-                    evaluateErrorState(code);
+                    triggerFatalError(code);
                 }
             } catch (err) {}
         });
@@ -499,16 +372,10 @@
             }
 
             function onPlaybackSuccess() {
+                if (isFatalError) return;
                 clearHangWatchdog();
-                hideAllOverlays();
-
-                // Si YouTube reportó restricción pero el audio corre, activar Modo Audio
-                if (ytReportedError) {
-                    enableAudioOnlyView();
-                } else {
-                    disableAudioOnlyView();
-                    hideCurtain();
-                }
+                hideErrorOverlay();
+                hideCurtain();
 
                 if (!reportedReady) {
                     reportedReady = true;
@@ -519,7 +386,7 @@
             player.addEventListener('can-play', onPlaybackSuccess);
             player.addEventListener('playing', onPlaybackSuccess);
             player.addEventListener('time-update', function () {
-                if (player.currentTime > 0.05) {
+                if (player.currentTime > 0.05 && !isFatalError) {
                     onPlaybackSuccess();
                 }
             });
@@ -532,7 +399,7 @@
                     else if (typeof detail.data === 'number') ytCode = detail.data;
                     else if (detail.cause && typeof detail.cause.data === 'number') ytCode = detail.cause.data;
                 }
-                evaluateErrorState(ytCode);
+                triggerFatalError(ytCode);
             });
 
             player.addEventListener('ended', function () {
@@ -595,7 +462,7 @@
                     }
                 } catch (e) {}
 
-                if (lastExpectedAutoplay && player.paused) {
+                if (lastExpectedAutoplay && player.paused && !isFatalError) {
                     safePlay();
                 }
             }, 2500);
@@ -608,13 +475,10 @@
                     switch (data.type) {
                         case 'load':
                             if (data.videoId && data.videoId !== currentVid) {
-                                hideAllOverlays();
-                                disableAudioOnlyView();
+                                hideErrorOverlay();
                                 showCurtain();
                                 clearHangWatchdog();
                                 currentVid = data.videoId;
-                                hasNextInQueue = !!data.hasNext;
-                                ytReportedError = false;
                                 endedThisVideo = false;
                                 endedReported = false;
                                 player.src = 'youtube/' + data.videoId;
@@ -643,17 +507,6 @@
                             }
                             break;
 
-                        case 'queue_state':
-                            hasNextInQueue = !!data.hasNext;
-                            if (isFatalError && hasNextInQueue && !countdownTimer) {
-                                startCountdown();
-                            } else if (isFatalError && !hasNextInQueue && countdownTimer) {
-                                clearInterval(countdownTimer);
-                                countdownTimer = null;
-                                countdownBox.classList.remove('visible');
-                            }
-                            break;
-
                         case 'play':
                             if (!isFatalError) {
                                 lastExpectedAutoplay = true;
@@ -672,8 +525,7 @@
                             }
                             break;
                         case 'stop':
-                            hideAllOverlays();
-                            disableAudioOnlyView();
+                            hideErrorOverlay();
                             showCurtain();
                             clearHangWatchdog();
                             lastExpectedAutoplay = false;
