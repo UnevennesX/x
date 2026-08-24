@@ -41,7 +41,6 @@
             overflow: hidden;
         }
 
-        /* Ocultamiento estricto hasta confirmar reproducción real */
         #rmExternalPlayer {
             width: 100% !important;
             height: 100% !important;
@@ -59,7 +58,7 @@
             opacity: 1;
         }
 
-        /* Cortina de carga protectora */
+        /* Cortina de carga inicial */
         .rm-curtain {
             position: absolute;
             inset: 0;
@@ -87,7 +86,66 @@
             to { transform: rotate(360deg); }
         }
 
-        /* Interfaz de Error 100% Centrada */
+        /* Capa elegante para videos restringidos que SÍ suenan (Modo Solo Audio) */
+        .rm-audio-layer {
+            position: absolute;
+            inset: 0;
+            z-index: 999;
+            background: radial-gradient(circle at center, #1e1e1e 0%, #0d0d0d 100%);
+            display: none;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            padding: 24px;
+            text-align: center;
+            gap: 14px;
+        }
+
+        .rm-audio-layer.active {
+            display: flex;
+        }
+
+        .rm-equalizer {
+            display: flex;
+            align-items: flex-end;
+            gap: 5px;
+            height: 36px;
+            margin-bottom: 4px;
+        }
+
+        .rm-eq-bar {
+            width: 5px;
+            background: var(--accent-primary, #4c6ef5);
+            border-radius: 3px;
+            animation: equalize 1.2s ease-in-out infinite alternate;
+        }
+
+        .rm-eq-bar:nth-child(1) { height: 14px; animation-delay: 0.1s; }
+        .rm-eq-bar:nth-child(2) { height: 28px; animation-delay: 0.3s; }
+        .rm-eq-bar:nth-child(3) { height: 36px; animation-delay: 0.2s; }
+        .rm-eq-bar:nth-child(4) { height: 22px; animation-delay: 0.4s; }
+        .rm-eq-bar:nth-child(5) { height: 16px; animation-delay: 0.15s; }
+
+        @keyframes equalize {
+            0% { transform: scaleY(0.3); }
+            100% { transform: scaleY(1); }
+        }
+
+        .rm-audio-title {
+            font-size: 1.15rem;
+            font-weight: 700;
+            color: #f1f1f1;
+            letter-spacing: -0.01em;
+        }
+
+        .rm-audio-sub {
+            font-size: 0.85rem;
+            color: #999999;
+            max-width: 320px;
+            line-height: 1.4;
+        }
+
+        /* Capa de Error Fatal (cuando NO se ve ni se escucha) */
         .rm-error-layer {
             position: absolute;
             inset: 0;
@@ -163,7 +221,7 @@
         }
 
         @media (max-width: 640px) {
-            .rm-error-layer {
+            .rm-error-layer, .rm-audio-layer {
                 padding: 16px;
             }
             .rm-yt-icon {
@@ -173,8 +231,8 @@
             .rm-yt-title {
                 font-size: 1.15rem;
             }
-            .rm-yt-reason {
-                font-size: 0.85rem;
+            .rm-yt-reason, .rm-audio-sub {
+                font-size: 0.82rem;
             }
         }
     </style>
@@ -185,12 +243,25 @@
             <div class="rm-spinner"></div>
         </div>
 
-        <!-- Reproductor limpio sin botones que no respondan -->
+        <!-- Reproductor Vidstack -->
         <media-player id="rmExternalPlayer" class="vds-player" load="eager" view-type="video" stream-type="on-demand" log-level="warn" crossorigin="" playsinline="" data-media-player="" tabindex="0" role="region" aria-label="Video Player" data-orientation="landscape">
             <media-provider></media-provider>
         </media-player>
 
-        <!-- Pantalla de Error Centrada -->
+        <!-- Capa Elegante: Modo Solo Audio (+18 que sí suena) -->
+        <div id="rmAudioOnlyOverlay" class="rm-audio-layer">
+            <div class="rm-equalizer">
+                <div class="rm-eq-bar"></div>
+                <div class="rm-eq-bar"></div>
+                <div class="rm-eq-bar"></div>
+                <div class="rm-eq-bar"></div>
+                <div class="rm-eq-bar"></div>
+            </div>
+            <h2 class="rm-audio-title">Reproduciendo Audio</h2>
+            <p class="rm-audio-sub">Contenido con restricción visual de YouTube.</p>
+        </div>
+
+        <!-- Capa de Error Fatal: No suena nada / Bloqueo total -->
         <div id="rmErrorOverlay" class="rm-error-layer">
             <div class="rm-yt-error-box">
                 <svg class="rm-yt-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
@@ -219,6 +290,7 @@
         const player = document.getElementById('rmExternalPlayer');
         const curtain = document.getElementById('rmCurtain');
 
+        const audioOnlyOverlay = document.getElementById('rmAudioOnlyOverlay');
         const errorOverlay = document.getElementById('rmErrorOverlay');
         const errorTitle = document.getElementById('rmErrorTitle');
         const errorReason = document.getElementById('rmErrorReason');
@@ -231,11 +303,12 @@
         let lastExpectedAutoplay = autoplay === '1';
         let hasNextInQueue = params.get('hasNext') === '1';
         let isFatalError = false;
+        let isAudioOnlyMode = false;
+        let ytReportedError = false;
         let endedThisVideo = false;
         let endedReported = false;
         let reportedReady = false;
         let hangWatchdogTimer = null;
-        let playbackConfirmed = false;
         let errorGraceTimer = null;
 
         function postToParent(m) {
@@ -243,18 +316,16 @@
         }
 
         function showCurtain() {
-            playbackConfirmed = false;
             curtain.classList.remove('hidden');
             player.classList.remove('vds-visible');
         }
 
         function hideCurtain() {
-            playbackConfirmed = true;
             curtain.classList.add('hidden');
             player.classList.add('vds-visible');
         }
 
-        function hideOverlay() {
+        function hideAllOverlays() {
             if (errorGraceTimer) {
                 clearTimeout(errorGraceTimer);
                 errorGraceTimer = null;
@@ -268,6 +339,18 @@
             countdownBox.classList.remove('visible');
         }
 
+        function enableAudioOnlyView() {
+            isAudioOnlyMode = true;
+            hideAllOverlays();
+            hideCurtain();
+            audioOnlyOverlay.classList.add('active');
+        }
+
+        function disableAudioOnlyView() {
+            isAudioOnlyMode = false;
+            audioOnlyOverlay.classList.remove('active');
+        }
+
         function clearHangWatchdog() {
             if (hangWatchdogTimer) {
                 clearTimeout(hangWatchdogTimer);
@@ -277,11 +360,12 @@
 
         function startHangWatchdog() {
             clearHangWatchdog();
+            // 7 segundos de tolerancia inicial
             hangWatchdogTimer = setTimeout(function () {
-                if (!playbackConfirmed && !isFatalError && (!player || player.currentTime < 0.2)) {
-                    triggerCustomError(150);
+                if (!isFatalError && (!player || player.currentTime < 0.2)) {
+                    evaluateErrorState(150);
                 }
-            }, 8000);
+            }, 7000);
         }
 
         function startCountdown() {
@@ -301,41 +385,43 @@
             }, 1000);
         }
 
-        function triggerCustomError(code) {
-            // Si el video ya está avanzando o reproduciéndose, ignorar el error
-            if (player && (playbackConfirmed || player.currentTime > 0.2 || !player.paused)) {
-                hideOverlay();
-                hideCurtain();
+        // Evaluación inteligente: ¿Suena o es fallo total?
+        function evaluateErrorState(code) {
+            ytReportedError = true;
+
+            // Si el audio ya está corriendo, entrar directamente a Modo Solo Audio
+            if (player && (player.currentTime > 0.2 || !player.paused)) {
+                enableAudioOnlyView();
                 return;
             }
+
+            // Esperar 2.5s para confirmar si arranca el audio tras el aviso de YouTube
             if (errorGraceTimer) clearTimeout(errorGraceTimer);
             errorGraceTimer = setTimeout(function () {
                 errorGraceTimer = null;
-                if (player && (playbackConfirmed || player.currentTime > 0.2 || !player.paused)) {
-                    hideOverlay();
-                    hideCurtain();
-                    return;
+                if (player && (player.currentTime > 0.2 || (!player.paused && player.currentTime > 0))) {
+                    enableAudioOnlyView();
+                } else {
+                    triggerFatalError(code);
                 }
-                showCustomError(code);
-            }, 1500);
+            }, 2500);
         }
 
-        function showCustomError(code) {
-            // Si el video está activo, no mostrar error
-            if (player && (player.currentTime > 0.2 || (!player.paused && player.currentTime > 0))) {
-                hideOverlay();
-                hideCurtain();
+        function triggerFatalError(code) {
+            if (player && player.currentTime > 0.2) {
+                enableAudioOnlyView();
                 return;
             }
             if (isFatalError) return;
             clearHangWatchdog();
             isFatalError = true;
 
+            disableAudioOnlyView();
             player.classList.remove('vds-visible');
             curtain.classList.add('hidden');
 
             errorTitle.textContent = 'Video no disponible';
-            errorReason.textContent = 'Restringido por derechos de autor.';
+            errorReason.textContent = 'Restringido por derechos de autor o país.';
             errorOverlay.classList.add('active');
 
             try { player.pause(); } catch (e) {}
@@ -353,27 +439,26 @@
         }
 
         function skipVideo() {
-            hideOverlay();
+            hideAllOverlays();
+            disableAudioOnlyView();
             clearHangWatchdog();
             postToParent({ type: 'skip_fatal', videoId: currentVid });
         }
 
-        // Intercepción de mensajes de YouTube
+        // Intercepción de mensajes del IFrame de YouTube
         window.addEventListener('message', function (ev) {
             try {
                 let data = ev.data;
                 if (typeof data === 'string') data = JSON.parse(data);
                 if (data && data.event === 'onError') {
-                    // Si ya está reproduciendo, descartar advertencias espurias
-                    if (player && player.currentTime > 0.2) return;
                     const code = data.info || (data.data && data.data.code) || 150;
-                    triggerCustomError(code);
+                    evaluateErrorState(code);
                 }
             } catch (err) {}
         });
 
         function safePlay() {
-            if (!player) return;
+            if (!player || isFatalError) return;
             try {
                 const p = player.play();
                 if (p && typeof p.catch === 'function') p.catch(function () {});
@@ -401,11 +486,18 @@
                 }
             }
 
-            // AUTO-RECUPERACIÓN: Si hay señal de reproducción, forzar limpieza de error
             function onPlaybackSuccess() {
                 clearHangWatchdog();
-                hideOverlay();
-                hideCurtain();
+                hideAllOverlays();
+
+                // Si YouTube reportó restricción pero suena, mostramos Modo Solo Audio
+                if (ytReportedError) {
+                    enableAudioOnlyView();
+                } else {
+                    disableAudioOnlyView();
+                    hideCurtain();
+                }
+
                 if (!reportedReady) {
                     reportedReady = true;
                     postToParent({ type: 'ready' });
@@ -415,14 +507,13 @@
             player.addEventListener('can-play', onPlaybackSuccess);
             player.addEventListener('playing', onPlaybackSuccess);
             player.addEventListener('time-update', function () {
-                // Si el tiempo avanza, desmantelar cualquier estado de error activo
+                // Si el tiempo avanza, confirmamos que el audio está vivo
                 if (player.currentTime > 0.05) {
                     onPlaybackSuccess();
                 }
             });
 
             player.addEventListener('error', function (ev) {
-                if (player && player.currentTime > 0.2) return;
                 const detail = ev.detail || ev;
                 let ytCode = 150;
                 if (detail) {
@@ -430,7 +521,7 @@
                     else if (typeof detail.data === 'number') ytCode = detail.data;
                     else if (detail.cause && typeof detail.cause.data === 'number') ytCode = detail.cause.data;
                 }
-                triggerCustomError(ytCode);
+                evaluateErrorState(ytCode);
             });
 
             player.addEventListener('ended', function () {
@@ -443,7 +534,7 @@
 
             function reportDuration() {
                 const d = player.duration;
-                if (d && isFinite(d) && d > 0) {
+                if (d && isFinite(d) && d > 0 && !isFatalError) {
                     postToParent({ type: 'duration', videoId: currentVid, duration: d });
                     return true;
                 }
@@ -476,7 +567,7 @@
 
             // Verificador de auto-play
             setInterval(function () {
-                if (endedThisVideo) {
+                if (endedThisVideo || isFatalError) {
                     lastExpectedAutoplay = false;
                     return;
                 }
@@ -493,7 +584,7 @@
                     }
                 } catch (e) {}
 
-                if (lastExpectedAutoplay && player.paused && !isFatalError) {
+                if (lastExpectedAutoplay && player.paused) {
                     safePlay();
                 }
             }, 2500);
@@ -506,11 +597,13 @@
                     switch (data.type) {
                         case 'load':
                             if (data.videoId && data.videoId !== currentVid) {
-                                hideOverlay();
+                                hideAllOverlays();
+                                disableAudioOnlyView();
                                 showCurtain();
                                 clearHangWatchdog();
                                 currentVid = data.videoId;
                                 hasNextInQueue = !!data.hasNext;
+                                ytReportedError = false;
                                 endedThisVideo = false;
                                 endedReported = false;
                                 player.src = 'youtube/' + data.videoId;
@@ -551,18 +644,25 @@
                             break;
 
                         case 'play':
-                            lastExpectedAutoplay = true;
-                            safePlay();
+                            if (!isFatalError) {
+                                lastExpectedAutoplay = true;
+                                safePlay();
+                            }
                             break;
                         case 'pause':
-                            lastExpectedAutoplay = false;
-                            try { player.pause(); } catch (e) {}
+                            if (!isFatalError) {
+                                lastExpectedAutoplay = false;
+                                try { player.pause(); } catch (e) {}
+                            }
                             break;
                         case 'seek':
-                            player.currentTime = Math.max(0, Number(data.time) || 0);
+                            if (!isFatalError) {
+                                player.currentTime = Math.max(0, Number(data.time) || 0);
+                            }
                             break;
                         case 'stop':
-                            hideOverlay();
+                            hideAllOverlays();
+                            disableAudioOnlyView();
                             showCurtain();
                             clearHangWatchdog();
                             lastExpectedAutoplay = false;
