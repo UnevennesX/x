@@ -103,7 +103,7 @@
         }
 
         .rm-error-layer.active {
-            display: flex;
+            display: flex !important;
         }
 
         .rm-yt-error-box {
@@ -197,10 +197,10 @@
 
                 <div class="rm-yt-details">
                     <h2 class="rm-yt-title" id="rmErrorTitle">Video no disponible</h2>
-                    <p class="rm-yt-reason" id="rmErrorReason">Este video tiene restricción de edad o inserción bloqueada.</p>
+                    <p class="rm-yt-reason" id="rmErrorReason">Este video tiene restricción de derechos de autor o inserción bloqueada.</p>
                     
                     <p class="rm-yt-countdown-msg" id="rmCountdownBox">
-                        Saltando a la siguiente canción en <strong id="rmCountdownNumber">3</strong> s...
+                        Saltando video en <strong id="rmCountdownNumber">3</strong> s...
                     </p>
                 </div>
             </div>
@@ -218,7 +218,6 @@
         const errorOverlay = document.getElementById('rmErrorOverlay');
         const errorTitle = document.getElementById('rmErrorTitle');
         const errorReason = document.getElementById('rmErrorReason');
-        const countdownBox = document.getElementById('rmCountdownBox');
         const countdownNumber = document.getElementById('rmCountdownNumber');
 
         let countdownTimer = null;
@@ -236,7 +235,7 @@
             const num = Number(code);
             if (num === 2) return 'El enlace o ID del video no es válido.';
             if (num === 100) return 'El video fue eliminado o es privado.';
-            if (num === 101 || num === 150) return 'Este video tiene restricción de edad (+18) o inserción bloqueada.';
+            if (num === 101 || num === 150) return 'Este video tiene restricción de derechos de autor o inserción bloqueada.';
             return 'No se pudo reproducir este video en la sala.';
         }
 
@@ -272,13 +271,16 @@
             }
         }
 
+        // Perro guardián estricto: si en 3.5s no avanzó el tiempo real de reproducción, salta error
         function startHangWatchdog() {
             clearHangWatchdog();
             hangWatchdogTimer = setTimeout(function () {
-                if (!playbackConfirmed && !isFatalError && (!player || player.currentTime < 0.1)) {
-                    triggerFatalError(150);
+                if (!playbackConfirmed && !isFatalError) {
+                    if (!player || player.currentTime < 0.1 || player.paused) {
+                        triggerFatalError(150);
+                    }
                 }
-            }, 6000);
+            }, 3500);
         }
 
         function startCountdown() {
@@ -298,7 +300,8 @@
         }
 
         function triggerFatalError(code) {
-            if (playbackConfirmed && player && player.currentTime > 0.5 && !player.paused) {
+            // Si el video ya está reproduciendo tiempo real de verdad, ignorar falsos positivos
+            if (playbackConfirmed && player && player.currentTime > 0.6 && !player.paused) {
                 return;
             }
 
@@ -306,6 +309,7 @@
             isFatalError = true;
             clearHangWatchdog();
 
+            // Ocultar completamente el reproductor de YouTube para que no se vea su error nativo
             player.classList.remove('vds-visible');
             curtain.classList.add('hidden');
 
@@ -352,13 +356,15 @@
                 if (!data) return;
 
                 if (data.event === 'onStateChange') {
-                    if (data.info === 1 || data.data === 1) {
-                        onPlaybackSuccess();
-                    } else if (data.info === 0 || data.data === 0) {
+                    if (data.info === 1 || data.data === 1) { // 1 = PLAYING
+                        if (player && player.currentTime > 0.05) {
+                            onPlaybackSuccess();
+                        }
+                    } else if (data.info === 0 || data.data === 0) { // 0 = ENDED
                         notifyEnded();
                     }
                 } else if (data.event === 'infoDelivery' && data.info) {
-                    if (data.info.playerState === 1 || data.info.currentTime > 0.05) {
+                    if (data.info.playerState === 1 && data.info.currentTime > 0.05) {
                         onPlaybackSuccess();
                     } else if (data.info.playerState === 0) {
                         notifyEnded();
@@ -399,24 +405,18 @@
                 }
             }
 
-            // Eventos estándar y eventos de Vidstack
-            ['can-play', 'playing', 'play', 'vds-playing', 'vds-play'].forEach(function(evtName) {
-                player.addEventListener(evtName, onPlaybackSuccess);
-            });
-
+            // Solo confirmar éxito cuando el tiempo AVANZA de verdad
             player.addEventListener('time-update', function () {
-                if (player.currentTime > 0.05 && !isFatalError) {
+                if (player.currentTime > 0.08 && !isFatalError) {
                     onPlaybackSuccess();
                 }
             });
 
-            setInterval(function() {
-                if (!isFatalError && player) {
-                    if (player.currentTime > 0.05 || (!player.paused && player.currentTime > 0)) {
-                        onPlaybackSuccess();
-                    }
+            player.addEventListener('playing', function () {
+                if (player.currentTime > 0.05 && !isFatalError) {
+                    onPlaybackSuccess();
                 }
-            }, 300);
+            });
 
             player.addEventListener('error', function (ev) {
                 const detail = ev.detail || ev;
@@ -466,7 +466,7 @@
             player.addEventListener('loadedmetadata', reportDuration);
             player.addEventListener('can-play', scheduleReportDuration);
 
-            // Verificador de auto-avance al término
+            // Verificador continuo de finalización
             setInterval(function () {
                 if (endedThisVideo || isFatalError) {
                     lastExpectedAutoplay = false;
@@ -480,7 +480,7 @@
                     }
                 } catch (e) {}
 
-                if (lastExpectedAutoplay && player.paused && !isFatalError) {
+                if (lastExpectedAutoplay && player.paused && !isFatalError && playbackConfirmed) {
                     safePlay();
                 }
             }, 1000);
@@ -500,6 +500,7 @@
                                 endedThisVideo = false;
                                 endedReported = false;
                                 reportedReady = false;
+                                playbackConfirmed = false;
                                 player.src = 'youtube/' + data.videoId;
                                 startHangWatchdog();
 
@@ -559,8 +560,6 @@
                             break;
                         case 'setVolume':
                             player.volume = Math.max(0, Math.min(1, (Number(data.volume) || 0) / 100));
-                            break;
-                        case 'queue_state':
                             break;
                     }
                 } catch (e) {}
