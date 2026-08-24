@@ -297,6 +297,9 @@
         }
 
         function triggerCustomError(code) {
+            // YouTube/Vidstack puede emitir errores tardíos aunque el vídeo ya esté reproduciendo.
+            if (playbackConfirmed && !player.paused && player.currentTime > 0.5) return;
+            if (isFatalError) return;
             clearHangWatchdog();
             isFatalError = true;
 
@@ -333,11 +336,9 @@
             try {
                 let data = ev.data;
                 if (typeof data === 'string') data = JSON.parse(data);
-                if (data) {
-                    if (data.event === 'onError' || [2, 5, 100, 101, 150, 153, 155].includes(Number(data.info))) {
-                        const code = data.info || (data.data && data.data.code) || 150;
-                        triggerCustomError(code);
-                    }
+                if (data && data.event === 'onError') {
+                    const code = data.info || (data.data && data.data.code) || 150;
+                    triggerCustomError(code);
                 }
             } catch (err) {}
         });
