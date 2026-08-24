@@ -230,6 +230,7 @@
         let endedReported = false;
         let reportedReady = false;
         let hangWatchdogTimer = null;
+        let lastReportedTime = 0;
 
         function getReadableErrorReason(code) {
             const num = Number(code);
@@ -271,7 +272,6 @@
             }
         }
 
-        // Perro guardián estricto: si en 3.5s no avanzó el tiempo real de reproducción, salta error
         function startHangWatchdog() {
             clearHangWatchdog();
             hangWatchdogTimer = setTimeout(function () {
@@ -300,7 +300,6 @@
         }
 
         function triggerFatalError(code) {
-            // Si el video ya está reproduciendo tiempo real de verdad, ignorar falsos positivos
             if (playbackConfirmed && player && player.currentTime > 0.6 && !player.paused) {
                 return;
             }
@@ -309,7 +308,6 @@
             isFatalError = true;
             clearHangWatchdog();
 
-            // Ocultar completamente el reproductor de YouTube para que no se vea su error nativo
             player.classList.remove('vds-visible');
             curtain.classList.add('hidden');
 
@@ -348,7 +346,7 @@
             postToParent({ type: 'ended', videoId: currentVid });
         }
 
-        // Intercepción directa de eventos de YouTube IFrame
+        // Intercepción directa de mensajes de YouTube IFrame
         window.addEventListener('message', function (ev) {
             try {
                 let data = ev.data;
@@ -356,11 +354,11 @@
                 if (!data) return;
 
                 if (data.event === 'onStateChange') {
-                    if (data.info === 1 || data.data === 1) { // 1 = PLAYING
+                    if (data.info === 1 || data.data === 1) { // PLAYING
                         if (player && player.currentTime > 0.05) {
                             onPlaybackSuccess();
                         }
-                    } else if (data.info === 0 || data.data === 0) { // 0 = ENDED
+                    } else if (data.info === 0 || data.data === 0) { // ENDED
                         notifyEnded();
                     }
                 } else if (data.event === 'infoDelivery' && data.info) {
@@ -405,10 +403,21 @@
                 }
             }
 
-            // Solo confirmar éxito cuando el tiempo AVANZA de verdad
+            // Reportar progreso y confirmar reproducción real
             player.addEventListener('time-update', function () {
                 if (player.currentTime > 0.08 && !isFatalError) {
                     onPlaybackSuccess();
+                    const nowSec = player.currentTime;
+                    if (Math.abs(nowSec - lastReportedTime) >= 2) {
+                        lastReportedTime = nowSec;
+                        postToParent({
+                            type: 'time',
+                            videoId: currentVid,
+                            time: nowSec,
+                            duration: player.duration || 0,
+                            paused: player.paused
+                        });
+                    }
                 }
             });
 
@@ -501,6 +510,7 @@
                                 endedReported = false;
                                 reportedReady = false;
                                 playbackConfirmed = false;
+                                lastReportedTime = 0;
                                 player.src = 'youtube/' + data.videoId;
                                 startHangWatchdog();
 
