@@ -177,6 +177,10 @@
             const activeToken = trackToken;
 
             showCurtain();
+            try {
+                player.pause();
+                player.removeAttribute('src');
+            } catch (e) {}
             player.src = 'youtube/' + vid;
             if (shouldAutoplay) {
                 player.setAttribute('autoplay', '');
