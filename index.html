@@ -50,7 +50,7 @@
             inset: 0;
             visibility: hidden !important;
             opacity: 0;
-            transition: opacity 0.15s ease-in;
+            transition: opacity 0.2s ease-in;
         }
 
         #rmExternalPlayer.vds-visible {
@@ -78,8 +78,8 @@
         }
 
         .rm-spinner {
-            width: 32px;
-            height: 32px;
+            width: 34px;
+            height: 34px;
             border: 3px solid rgba(255, 255, 255, 0.12);
             border-top-color: #4c6ef5;
             border-radius: 50%;
@@ -90,7 +90,7 @@
             to { transform: rotate(360deg); }
         }
 
-        /* Barra de Progreso 100% Real Integrada */
+        /* Barra de Progreso Integrada */
         .rm-native-progress {
             position: absolute;
             left: 0;
@@ -100,12 +100,12 @@
             display: grid;
             grid-template-columns: auto minmax(0, 1fr) auto;
             align-items: center;
-            gap: 0.6rem;
-            padding: 0.8rem 1rem 0.6rem;
+            gap: 0.65rem;
+            padding: 0.85rem 1rem 0.65rem;
             color: #b0b0b0;
             font-size: 0.72rem;
             font-variant-numeric: tabular-nums;
-            background: linear-gradient(180deg, transparent, rgba(0, 0, 0, 0.85));
+            background: linear-gradient(180deg, transparent, rgba(0, 0, 0, 0.88));
             opacity: 0;
             transform: translateY(4px);
             transition: opacity 0.2s ease, transform 0.2s ease;
@@ -284,13 +284,14 @@
         let countdownTimer = null;
         let countdownSec = 3;
         let currentVid = videoId || null;
-        let lastExpectedAutoplay = autoplay === '1';
+        let shouldAutoplay = autoplay === '1';
         let isFatalError = false;
         let endedReported = false;
         let reportedReady = false;
         let isDraggingProgress = false;
         let hideControlsTimer = null;
         let lastReportedTime = 0;
+        let pendingStartTime = startTime;
 
         function fmtDuration(sec) {
             sec = Math.max(0, Math.floor(Number(sec) || 0));
@@ -326,7 +327,7 @@
         function startCountdown() {
             if (countdownTimer) clearInterval(countdownTimer);
             countdownSec = 3;
-            countdownNumber.textContent = countdownSec;
+            if (countdownNumber) countdownNumber.textContent = countdownSec;
 
             countdownTimer = setInterval(function () {
                 countdownSec--;
@@ -358,7 +359,6 @@
             errorOverlay.classList.add('active');
 
             try { player.pause(); } catch (e) {}
-            // Inicia la cuenta regresiva visible y salta únicamente al llegar a 0
             startCountdown();
         }
 
@@ -384,7 +384,7 @@
                 if (player.currentTime < player.duration - 2.5) return;
             }
             endedReported = true;
-            lastExpectedAutoplay = false;
+            shouldAutoplay = false;
             postToParent({ type: 'ended', videoId: currentVid });
         }
 
@@ -438,8 +438,13 @@
         function safePlay() {
             if (!player || isFatalError) return;
             try {
-                const p = player.play();
-                if (p && typeof p.catch === 'function') p.catch(function () {});
+                const playPromise = player.play();
+                if (playPromise && typeof playPromise.catch === 'function') {
+                    playPromise.catch(function () {
+                        player.muted = true;
+                        player.play().catch(function () {});
+                    });
+                }
             } catch (e) {}
         }
 
@@ -450,6 +455,39 @@
                 updateProgressUI();
                 postToParent({ type: 'duration', videoId: currentVid, duration: d });
             }
+        }
+
+        function initTrack(vid, auto, startAt) {
+            currentVid = vid;
+            shouldAutoplay = !!auto;
+            pendingStartTime = Math.max(0, Number(startAt) || 0);
+            endedReported = false;
+            reportedReady = false;
+            lastReportedTime = 0;
+            isFatalError = false;
+
+            hideErrorOverlay();
+            showCurtain();
+            updateProgressUI();
+
+            player.src = 'youtube/' + vid;
+            if (shouldAutoplay) {
+                player.setAttribute('autoplay', '');
+            } else {
+                player.removeAttribute('autoplay');
+            }
+
+            const attemptStart = function () {
+                if (pendingStartTime > 0) {
+                    try { player.currentTime = pendingStartTime; } catch (e) {}
+                }
+                reportDuration();
+                if (shouldAutoplay) safePlay();
+            };
+
+            player.addEventListener('loadedmetadata', attemptStart, { once: true });
+            player.addEventListener('can-play', attemptStart, { once: true });
+            setTimeout(attemptStart, 800);
         }
 
         // Intercepción de mensajes del IFrame de YouTube
@@ -472,25 +510,8 @@
         });
 
         if (player) {
-            if (autoplay !== '1') player.removeAttribute('autoplay');
-
             if (videoId) {
-                showCurtain();
-                player.src = 'youtube/' + videoId;
-
-                if (autoplay === '1') {
-                    player.setAttribute('autoplay', '');
-                    try { player.muted = true; } catch (e) {}
-                    lastExpectedAutoplay = true;
-                }
-
-                if (startTime > 0) {
-                    const onReadySeek = function () {
-                        player.removeEventListener('can-play', onReadySeek);
-                        try { player.currentTime = startTime; } catch (e) {}
-                    };
-                    player.addEventListener('can-play', onReadySeek);
-                }
+                initTrack(videoId, autoplay === '1', startTime);
             }
 
             player.addEventListener('time-update', function () {
@@ -499,7 +520,7 @@
                     updateProgressUI();
 
                     const nowSec = player.currentTime;
-                    if (Math.abs(nowSec - lastReportedTime) >= 1.5) {
+                    if (Math.abs(nowSec - lastReportedTime) >= 2) {
                         lastReportedTime = nowSec;
                         postToParent({
                             type: 'time',
@@ -533,12 +554,7 @@
 
             player.addEventListener('durationchange', reportDuration);
             player.addEventListener('duration-change', reportDuration);
-            player.addEventListener('loadedmetadata', function () {
-                reportDuration();
-                if (startTime > 0) {
-                    try { player.currentTime = startTime; } catch (e) {}
-                }
-            });
+            player.addEventListener('loadedmetadata', reportDuration);
             player.addEventListener('can-play', reportDuration);
 
             window.addEventListener('message', function (ev) {
@@ -548,52 +564,26 @@
                     switch (data.type) {
                         case 'load':
                             if (data.videoId) {
-                                hideErrorOverlay();
-                                showCurtain();
-                                currentVid = data.videoId;
-                                endedReported = false;
-                                reportedReady = false;
-                                lastReportedTime = 0;
-                                updateProgressUI();
-                                player.src = 'youtube/' + data.videoId;
-
-                                if (data.autoplay) {
-                                    player.setAttribute('autoplay', '');
-                                    try { player.muted = true; } catch (e) {}
-                                    lastExpectedAutoplay = true;
-                                } else {
-                                    player.removeAttribute('autoplay');
-                                    lastExpectedAutoplay = false;
-                                }
-
-                                const loadStart = Math.max(0, Number(data.time) || 0);
-                                const onCanPlay = function () {
-                                    player.removeEventListener('can-play', onCanPlay);
-                                    if (loadStart > 0) {
-                                        try { player.currentTime = loadStart; } catch (e) {}
-                                    }
-                                    if (lastExpectedAutoplay) safePlay();
-                                };
-                                player.addEventListener('can-play', onCanPlay);
+                                initTrack(data.videoId, !!data.autoplay, data.time);
                             }
                             break;
 
                         case 'play':
                             if (!isFatalError) {
-                                lastExpectedAutoplay = true;
+                                shouldAutoplay = true;
                                 safePlay();
                             }
                             break;
                         case 'pause':
                             if (!isFatalError) {
-                                lastExpectedAutoplay = false;
+                                shouldAutoplay = false;
                                 try { player.pause(); } catch (e) {}
                             }
                             break;
                         case 'seek':
                             if (!isFatalError) {
                                 const targetTime = Math.max(0, Number(data.time) || 0);
-                                if (Math.abs(player.currentTime - targetTime) > 1.5) {
+                                if (Math.abs(player.currentTime - targetTime) > 4.0) {
                                     player.currentTime = targetTime;
                                     updateProgressUI();
                                 }
@@ -602,7 +592,7 @@
                         case 'stop':
                             hideErrorOverlay();
                             showCurtain();
-                            lastExpectedAutoplay = false;
+                            shouldAutoplay = false;
                             try { player.pause(); } catch (e) {}
                             player.currentTime = 0;
                             updateProgressUI();
