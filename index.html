@@ -3,9 +3,9 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Native Vidstack Player</title>
+    <meta name="referrer" content="strict-origin-when-cross-origin">
+    <title>Player</title>
     
-    <!-- Vidstack Native Core -->
     <link rel="stylesheet" href="https://cdn.vidstack.io/player/theme.css">
     <link rel="stylesheet" href="https://cdn.vidstack.io/player/video.css">
     <script type="module" src="https://cdn.vidstack.io/player"></script>
@@ -14,25 +14,15 @@
     <style>
         * { box-sizing: border-box; user-select: none; margin: 0; padding: 0; }
 
-        html, body {
+        html, body, #playerHost {
             width: 100%;
             height: 100%;
             overflow: hidden;
             background: #000;
             font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif;
             color: #f1f1f1;
-            -webkit-font-smoothing: antialiased;
         }
 
-        #playerHost {
-            width: 100%;
-            height: 100%;
-            position: relative;
-            overflow: hidden;
-            background: #000;
-        }
-
-        /* Reproductor Nativo HTML5 */
         #rmExternalPlayer {
             width: 100%;
             height: 100%;
@@ -45,147 +35,71 @@
             --video-height: 100%;
         }
 
-        /* Spinner de Carga */
-        #loadingSpinner {
-            position: absolute;
-            inset: 0;
-            background: rgba(0, 0, 0, 0.7);
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            z-index: 50;
-            opacity: 0;
-            visibility: hidden;
-            transition: opacity 0.2s ease;
-        }
-
-        #loadingSpinner.active {
-            opacity: 1;
-            visibility: visible;
-        }
-
-        .spinner {
-            width: 44px;
-            height: 44px;
-            border: 3px solid rgba(255, 255, 255, 0.15);
-            border-top-color: #ffffff;
-            border-radius: 50%;
-            animation: spin 0.8s linear infinite;
-        }
-
-        @keyframes spin {
-            to { transform: rotate(360deg); }
-        }
-
-        /* Pantalla de Error Única y Central */
-        #unifiedErrorScreen {
-            position: absolute;
-            inset: 0;
-            background: #0a0a0a;
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            justify-content: center;
-            z-index: 100;
-            opacity: 0;
-            visibility: hidden;
-            transition: opacity 0.25s ease;
-            text-align: center;
-            padding: 24px;
-        }
-
-        #unifiedErrorScreen.active {
-            opacity: 1;
-            visibility: visible;
-        }
-
-        .error-circle {
-            width: 56px;
-            height: 56px;
-            border-radius: 50%;
-            border: 2px solid #555;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            margin-bottom: 14px;
-            color: #aaa;
-            font-size: 26px;
-            font-weight: 600;
-        }
-
-        .error-text {
-            font-size: 15px;
-            font-weight: 500;
-            color: #d1d1d1;
+        /* Bloquea overlays o textos residuales que Vidstack intente superponer */
+        .vds-error,
+        [data-media-error],
+        media-player[data-error] .vds-poster {
+            display: none !important;
         }
     </style>
 </head>
 <body>
     <div id="playerHost">
-        <!-- Vidstack en modo nativo sin iframe -->
-        <media-player id="rmExternalPlayer" playsinline crossorigin load="eager" log-level="silent">
+        <media-player id="rmExternalPlayer" class="vds-player" load="eager" view-type="video" stream-type="on-demand" log-level="silent" crossorigin playsinline>
             <media-provider></media-provider>
         </media-player>
-
-        <!-- Indicador de carga -->
-        <div id="loadingSpinner">
-            <div class="spinner"></div>
-        </div>
-
-        <!-- Pantalla única de error -->
-        <div id="unifiedErrorScreen">
-            <div class="error-circle">!</div>
-            <div class="error-text" id="errorMsgText">Este video no está disponible</div>
-        </div>
     </div>
 
     <script>
         const params = new URLSearchParams(window.location.search);
-        const videoParam = params.get('v');
+        const videoId = params.get('v');
         const autoplay = params.get('autoplay') === '1';
         const startTime = parseFloat(params.get('t')) || 0;
 
         const player = document.getElementById('rmExternalPlayer');
-        const spinner = document.getElementById('loadingSpinner');
-        const errorScreen = document.getElementById('unifiedErrorScreen');
-        const errorMsgText = document.getElementById('errorMsgText');
 
-        let currentTarget = videoParam || null;
+        function fitProviderFrame(attempt) {
+            if (!player) return;
+            const frame = player.provider && player.provider.iframe;
+            if (!frame) {
+                if ((attempt || 0) < 60) requestAnimationFrame(function () { fitProviderFrame((attempt || 0) + 1); });
+                return;
+            }
+            frame.style.setProperty('width', '100%', 'important');
+            frame.style.setProperty('height', '100%', 'important');
+            frame.style.setProperty('min-width', '0', 'important');
+            frame.style.setProperty('min-height', '0', 'important');
+            frame.style.setProperty('position', 'absolute', 'important');
+            frame.style.setProperty('inset', '0', 'important');
+        }
+
+        fitProviderFrame(0);
+
+        let currentVid = videoId || null;
         let shouldAutoplay = autoplay;
         let endedReported = false;
         let reportedReady = false;
         let lastReportedTime = 0;
         let pendingStartTime = startTime;
-        let activeToken = 0;
+        let trackToken = 0;
 
         function postToParent(m) {
             try { window.parent.postMessage(Object.assign({ source: 'x-player' }, m), '*'); } catch (e) {}
         }
 
-        function showLoading(show) {
-            if (spinner) {
-                if (show) spinner.classList.add('active');
-                else spinner.classList.remove('active');
+        function onPlaybackSuccess() {
+            if (!reportedReady) {
+                reportedReady = true;
+                postToParent({ type: 'ready', videoId: currentVid });
             }
-        }
-
-        function showError(msg) {
-            showLoading(false);
-            if (errorMsgText && msg) errorMsgText.textContent = msg;
-            if (errorScreen) errorScreen.classList.add('active');
-            postToParent({ type: 'error', videoId: currentTarget, message: msg });
-        }
-
-        function hideError() {
-            if (errorScreen) errorScreen.classList.remove('active');
         }
 
         function safePlay() {
             if (!player) return;
             try {
-                const p = player.play();
-                if (p && typeof p.catch === 'function') {
-                    p.catch(function () {
+                const playPromise = player.play();
+                if (playPromise && typeof playPromise.catch === 'function') {
+                    playPromise.catch(function () {
                         player.muted = true;
                         player.play().catch(function () {});
                     });
@@ -193,186 +107,126 @@
             } catch (e) {}
         }
 
-        // Resolutor de Streams Directos (Piped & Invidious APIs)
-        async function resolveStreamSource(target) {
-            // Si ya es un enlace directo a archivo .mp4 o stream .m3u8
-            if (target.startsWith('http://') || target.startsWith('https://') || target.includes('.m3u8') || target.includes('.mp4')) {
-                return {
-                    src: target,
-                    type: target.includes('.m3u8') ? 'application/x-mpegurl' : 'video/mp4'
-                };
-            }
-
-            // Lista de instancias para balanceo y redundancia
-            const endpoints = [
-                `https://pipedapi.kavin.rocks/streams/${target}`,
-                `https://pipedapi.adminforge.de/streams/${target}`,
-                `https://inv.nadeko.net/api/v1/videos/${target}`,
-                `https://invidious.nerdvpn.de/api/v1/videos/${target}`
-            ];
-
-            for (const url of endpoints) {
-                try {
-                    const ctrl = new AbortController();
-                    const timer = setTimeout(() => ctrl.abort(), 3500);
-                    const res = await fetch(url, { signal: ctrl.signal });
-                    clearTimeout(timer);
-
-                    if (!res.ok) continue;
-                    const data = await res.json();
-
-                    // Formato Piped
-                    if (data.hls) return { src: data.hls, type: 'application/x-mpegurl' };
-                    if (data.videoStreams && data.videoStreams.length > 0) {
-                        const stream = data.videoStreams.find(s => !s.videoOnly) || data.videoStreams[0];
-                        return { src: stream.url, type: stream.mimeType || 'video/mp4' };
-                    }
-
-                    // Formato Invidious
-                    if (data.hlsUrl) return { src: data.hlsUrl, type: 'application/x-mpegurl' };
-                    if (data.formatStreams && data.formatStreams.length > 0) {
-                        const stream = data.formatStreams[data.formatStreams.length - 1];
-                        return { src: stream.url, type: stream.type || 'video/mp4' };
-                    }
-                } catch (err) {
-                    // Intenta con la siguiente instancia
-                }
-            }
-
-            throw new Error('No se pudo extraer el flujo de video directo.');
-        }
-
-        async function initTrack(target, auto, startAt) {
-            hideError();
-            showLoading(true);
-
-            currentTarget = target;
+        function initTrack(vid, auto, startAt) {
+            currentVid = vid;
             shouldAutoplay = !!auto;
             pendingStartTime = Math.max(0, Number(startAt) || 0);
             endedReported = false;
             reportedReady = false;
             lastReportedTime = 0;
-            activeToken += 1;
-            const currentToken = activeToken;
+            trackToken += 1;
+            const activeToken = trackToken;
 
             try {
                 player.pause();
-                player.src = '';
+                player.removeAttribute('src');
             } catch (e) {}
 
-            try {
-                const source = await resolveStreamSource(target);
-                if (currentToken !== activeToken) return;
-
-                // Asignar el stream directo al motor nativo de Vidstack
-                player.src = { src: source.src, type: source.type };
-
-                if (shouldAutoplay) {
-                    player.setAttribute('autoplay', '');
-                } else {
-                    player.removeAttribute('autoplay');
-                }
-
-                const onCanPlay = function () {
-                    if (currentToken !== activeToken) return;
-                    showLoading(false);
-                    if (pendingStartTime > 0) {
-                        try { player.currentTime = pendingStartTime; } catch (e) {}
-                    }
-                    if (shouldAutoplay) safePlay();
-                };
-
-                player.addEventListener('can-play', onCanPlay, { once: true });
-                player.addEventListener('loadedmetadata', onCanPlay, { once: true });
-
-            } catch (err) {
-                if (currentToken === activeToken) {
-                    showError('Este video no está disponible');
-                }
+            // Si es URL directa (mp4/m3u8) o ID de YouTube
+            if (vid.startsWith('http') || vid.includes('.mp4') || vid.includes('.m3u8')) {
+                player.src = vid;
+            } else {
+                player.src = 'youtube/' + vid;
             }
+
+            fitProviderFrame(0);
+
+            if (shouldAutoplay) {
+                player.setAttribute('autoplay', '');
+            } else {
+                player.removeAttribute('autoplay');
+            }
+
+            const attemptStart = function () {
+                if (activeToken !== trackToken) return;
+                if (pendingStartTime > 0) {
+                    try { player.currentTime = pendingStartTime; } catch (e) {}
+                }
+                if (shouldAutoplay) safePlay();
+            };
+
+            player.addEventListener('loadedmetadata', attemptStart, { once: true });
+            player.addEventListener('can-play', attemptStart, { once: true });
+            setTimeout(attemptStart, 800);
         }
 
         if (player) {
-            if (videoParam) {
-                initTrack(videoParam, autoplay, startTime);
+            if (videoId) {
+                initTrack(videoId, autoplay, startTime);
             }
 
-            player.addEventListener('error', function () {
-                showError('Error de reproducción en el stream');
-            });
-
-            player.addEventListener('playing', function () {
-                showLoading(false);
-                hideError();
-                if (!reportedReady) {
-                    reportedReady = true;
-                    postToParent({ type: 'ready', videoId: currentTarget });
-                }
-            });
-
             player.addEventListener('time-update', function () {
-                const nowSec = player.currentTime;
-                if (nowSec > 0.05 && !reportedReady) {
-                    reportedReady = true;
-                    showLoading(false);
-                    postToParent({ type: 'ready', videoId: currentTarget });
-                }
-
-                if (Math.abs(nowSec - lastReportedTime) >= 2) {
-                    lastReportedTime = nowSec;
-                    postToParent({
-                        type: 'time',
-                        videoId: currentTarget,
-                        time: nowSec,
-                        duration: player.duration || 0,
-                        paused: player.paused
-                    });
+                if (player.currentTime > 0.05) {
+                    onPlaybackSuccess();
+                    const nowSec = player.currentTime;
+                    if (Math.abs(nowSec - lastReportedTime) >= 2) {
+                        lastReportedTime = nowSec;
+                        postToParent({
+                            type: 'time',
+                            videoId: currentVid,
+                            time: nowSec,
+                            duration: player.duration || 0,
+                            paused: player.paused
+                        });
+                    }
                 }
             });
+
+            player.addEventListener('playing', onPlaybackSuccess);
 
             player.addEventListener('ended', function () {
                 if (endedReported) return;
                 endedReported = true;
-                postToParent({ type: 'ended', videoId: currentTarget });
+                postToParent({ type: 'ended', videoId: currentVid });
             });
 
-            // Escuchar comandos desde voice-eva
-            window.addEventListener('message', function (ev) {
-                const data = ev.data;
-                if (!data || typeof data !== 'object' || data.source !== 'voice-eva') return;
+            player.addEventListener('error', function () {
+                postToParent({ type: 'error', videoId: currentVid });
+            });
 
-                switch (data.type) {
-                    case 'load':
-                        if (data.videoId) {
-                            initTrack(data.videoId, !!data.autoplay, data.time);
-                        }
-                        break;
-                    case 'play':
-                        shouldAutoplay = true;
-                        safePlay();
-                        break;
-                    case 'pause':
-                        shouldAutoplay = false;
-                        try { player.pause(); } catch (e) {}
-                        break;
-                    case 'seek':
-                        const targetTime = Math.max(0, Number(data.time) || 0);
-                        player.currentTime = targetTime;
-                        break;
-                    case 'stop':
-                        shouldAutoplay = false;
-                        try { player.pause(); } catch (e) {}
-                        player.currentTime = 0;
-                        break;
-                    case 'mute':
-                        player.muted = true;
-                        break;
-                    case 'unmute':
-                        player.muted = false;
-                        break;
-                    case 'setVolume':
-                        player.volume = Math.max(0, Math.min(1, (Number(data.volume) || 0) / 100));
-                        break;
+            window.addEventListener('message', function (ev) {
+                let data = ev.data;
+                if (typeof data === 'string') {
+                    try { data = JSON.parse(data); } catch (e) {}
+                }
+                if (!data || typeof data !== 'object') return;
+
+                if (data.event === 'onError' || (data.info && data.info.errorCode)) {
+                    postToParent({ type: 'error', videoId: currentVid, code: data.info });
+                    return;
+                }
+
+                if (data.source === 'voice-eva') {
+                    switch (data.type) {
+                        case 'load':
+                            if (data.videoId) initTrack(data.videoId, !!data.autoplay, data.time);
+                            break;
+                        case 'play':
+                            shouldAutoplay = true;
+                            safePlay();
+                            break;
+                        case 'pause':
+                            shouldAutoplay = false;
+                            try { player.pause(); } catch (e) {}
+                            break;
+                        case 'seek':
+                            player.currentTime = Math.max(0, Number(data.time) || 0);
+                            break;
+                        case 'stop':
+                            shouldAutoplay = false;
+                            try { player.pause(); } catch (e) {}
+                            player.currentTime = 0;
+                            break;
+                        case 'mute':
+                            player.muted = true;
+                            break;
+                        case 'unmute':
+                            player.muted = false;
+                            break;
+                        case 'setVolume':
+                            player.volume = Math.max(0, Math.min(1, (Number(data.volume) || 0) / 100));
+                            break;
+                    }
                 }
             });
         }
