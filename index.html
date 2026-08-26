@@ -274,13 +274,18 @@
 
         function startHangWatchdog() {
             clearHangWatchdog();
+            // Solo vigilar si realmente se esperaba autoplay; en modo manual el
+            // usuario decide cuándo reproducir y no debe saltar solo.
+            if (!lastExpectedAutoplay) return;
             hangWatchdogTimer = setTimeout(function () {
                 if (!playbackConfirmed && !isFatalError) {
-                    if (!player || player.currentTime < 0.1 || player.paused) {
+                    // Fallo real solo si el video nunca arrancó (currentTime ~ 0).
+                    // Si ya corre pero está pausado, no lo damos por fallido.
+                    if (!player || player.currentTime < 0.1) {
                         triggerFatalError(150);
                     }
                 }
-            }, 3500);
+            }, 6000);
         }
 
         function startCountdown() {
@@ -388,12 +393,14 @@
             if (videoId) {
                 showCurtain();
                 player.src = 'youtube/' + videoId;
-                startHangWatchdog();
 
                 if (autoplay === '1') {
                     player.setAttribute('autoplay', '');
+                    // YouTube solo permite autoplay si está silenciado (iframe de origen cruzado)
+                    try { player.muted = true; } catch (e) {}
                     lastExpectedAutoplay = true;
                 }
+                startHangWatchdog();
                 if (startTime > 0) {
                     const onReadySeek = function () {
                         player.removeEventListener('can-play', onReadySeek);
@@ -512,15 +519,17 @@
                                 playbackConfirmed = false;
                                 lastReportedTime = 0;
                                 player.src = 'youtube/' + data.videoId;
-                                startHangWatchdog();
 
                                 if (data.autoplay) {
                                     player.setAttribute('autoplay', '');
+                                    // YouTube solo permite autoplay si está silenciado (iframe de origen cruzado)
+                                    try { player.muted = true; } catch (e) {}
                                     lastExpectedAutoplay = true;
                                 } else {
                                     player.removeAttribute('autoplay');
                                     lastExpectedAutoplay = false;
                                 }
+                                startHangWatchdog();
 
                                 const loadStart = Math.max(0, Number(data.time) || 0);
                                 const onCanPlay = function () {
