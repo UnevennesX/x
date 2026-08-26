@@ -27,7 +27,7 @@
             width: 100%;
             height: 100%;
             overflow: hidden;
-            background-color: #0f0f0f;
+            background-color: #000;
             font-family: "YouTube Sans", "Roboto", -apple-system, BlinkMacSystemFont, Arial, sans-serif;
             color: #f1f1f1;
             -webkit-font-smoothing: antialiased;
@@ -37,7 +37,7 @@
             width: 100% !important;
             height: 100% !important;
             position: relative;
-            background-color: #0f0f0f;
+            background-color: #000;
             overflow: hidden;
         }
 
@@ -58,12 +58,12 @@
             opacity: 1;
         }
 
-        /* Cortina de carga */
+        /* Cortina de carga inicial */
         .rm-curtain {
             position: absolute;
             inset: 0;
-            z-index: 9999;
-            background-color: #0f0f0f;
+            z-index: 90;
+            background-color: #000;
             display: flex;
             align-items: center;
             justify-content: center;
@@ -81,7 +81,7 @@
             width: 32px;
             height: 32px;
             border: 3px solid rgba(255, 255, 255, 0.12);
-            border-top-color: #f1f1f1;
+            border-top-color: #4c6ef5;
             border-radius: 50%;
             animation: spin 0.8s linear infinite;
         }
@@ -90,11 +90,79 @@
             to { transform: rotate(360deg); }
         }
 
-        /* Capa de Error Limpia en Español */
+        /* Barra de Progreso 100% Real Integrada */
+        .rm-native-progress {
+            position: absolute;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            z-index: 80;
+            display: grid;
+            grid-template-columns: auto minmax(0, 1fr) auto;
+            align-items: center;
+            gap: 0.6rem;
+            padding: 0.8rem 1rem 0.6rem;
+            color: #b0b0b0;
+            font-size: 0.72rem;
+            font-variant-numeric: tabular-nums;
+            background: linear-gradient(180deg, transparent, rgba(0, 0, 0, 0.85));
+            opacity: 0;
+            transform: translateY(4px);
+            transition: opacity 0.2s ease, transform 0.2s ease;
+            pointer-events: none;
+        }
+
+        #playerHost:hover .rm-native-progress,
+        #playerHost.show-controls .rm-native-progress {
+            opacity: 1;
+            transform: translateY(0);
+            pointer-events: auto;
+        }
+
+        .rm-native-slider {
+            width: 100%;
+            height: 5px;
+            appearance: none;
+            -webkit-appearance: none;
+            background: rgba(255, 255, 255, 0.2);
+            border-radius: 99px;
+            outline: none;
+            cursor: pointer;
+            accent-color: #4c6ef5;
+        }
+
+        .rm-native-slider::-webkit-slider-thumb {
+            appearance: none;
+            -webkit-appearance: none;
+            width: 14px;
+            height: 14px;
+            border-radius: 50%;
+            background: #4c6ef5;
+            border: 2px solid #2346b8;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
+            cursor: pointer;
+        }
+
+        .rm-native-slider::-moz-range-thumb {
+            width: 14px;
+            height: 14px;
+            border-radius: 50%;
+            background: #4c6ef5;
+            border: 2px solid #2346b8;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
+            cursor: pointer;
+        }
+
+        .rm-native-slider:disabled {
+            opacity: 0.3;
+            cursor: not-allowed;
+        }
+
+        /* Capa de Error */
         .rm-error-layer {
             position: absolute;
             inset: 0;
-            z-index: 99999;
+            z-index: 100;
             background-color: #121212;
             display: none;
             align-items: center;
@@ -138,7 +206,6 @@
             font-weight: 700;
             color: #f1f1f1;
             line-height: 1.25;
-            letter-spacing: -0.01em;
         }
 
         .rm-yt-reason {
@@ -152,28 +219,11 @@
             margin-top: 10px;
             font-size: 0.84rem;
             color: #888888;
-            line-height: 1.4;
         }
 
         .rm-yt-countdown-msg strong {
             color: #f1f1f1;
             font-weight: 700;
-        }
-
-        @media (max-width: 640px) {
-            .rm-error-layer {
-                padding: 16px;
-            }
-            .rm-yt-icon {
-                width: 44px;
-                height: 44px;
-            }
-            .rm-yt-title {
-                font-size: 1.1rem;
-            }
-            .rm-yt-reason {
-                font-size: 0.82rem;
-            }
         }
     </style>
 </head>
@@ -187,6 +237,13 @@
             <media-provider></media-provider>
         </media-player>
 
+        <!-- Barra de Progreso Integrada al Reproductor -->
+        <div class="rm-native-progress" id="rmNativeProgress">
+            <span id="rmCurTime">--:--</span>
+            <input type="range" id="rmProgressSlider" class="rm-native-slider" min="0" max="100" step="0.1" value="0" disabled>
+            <span id="rmDurTime">--:--</span>
+        </div>
+
         <div id="rmErrorOverlay" class="rm-error-layer">
             <div class="rm-yt-error-box">
                 <svg class="rm-yt-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -198,7 +255,6 @@
                 <div class="rm-yt-details">
                     <h2 class="rm-yt-title" id="rmErrorTitle">Video no disponible</h2>
                     <p class="rm-yt-reason" id="rmErrorReason">Este video tiene restricción de derechos de autor o inserción bloqueada.</p>
-                    
                     <p class="rm-yt-countdown-msg" id="rmCountdownBox">
                         Saltando video en <strong id="rmCountdownNumber">3</strong> s...
                     </p>
@@ -212,8 +268,14 @@
         const videoId = params.get('v');
         const autoplay = params.get('autoplay');
         const startTime = parseFloat(params.get('t')) || 0;
+
+        const host = document.getElementById('playerHost');
         const player = document.getElementById('rmExternalPlayer');
         const curtain = document.getElementById('rmCurtain');
+
+        const curTimeEl = document.getElementById('rmCurTime');
+        const durTimeEl = document.getElementById('rmDurTime');
+        const progressSlider = document.getElementById('rmProgressSlider');
 
         const errorOverlay = document.getElementById('rmErrorOverlay');
         const errorTitle = document.getElementById('rmErrorTitle');
@@ -225,17 +287,18 @@
         let currentVid = videoId || null;
         let lastExpectedAutoplay = autoplay === '1';
         let isFatalError = false;
-        let playbackConfirmed = false;
         let endedReported = false;
         let reportedReady = false;
+        let isDraggingProgress = false;
+        let hideControlsTimer = null;
         let lastReportedTime = 0;
 
-        function getReadableErrorReason(code) {
-            const num = Number(code);
-            if (num === 2) return 'El enlace o ID del video no es válido.';
-            if (num === 100) return 'El video fue eliminado o es privado.';
-            if (num === 101 || num === 150) return 'Este video tiene restricción de derechos de autor o inserción bloqueada.';
-            return 'No se pudo reproducir este video en la sala.';
+        function fmtDuration(sec) {
+            sec = Math.max(0, Math.floor(Number(sec) || 0));
+            const h = Math.floor(sec / 3600);
+            const m = Math.floor((sec % 3600) / 60);
+            const s = sec % 60;
+            return (h ? h + ':' : '') + (m < 10 && h ? '0' : '') + m + ':' + (s < 10 ? '0' : '') + s;
         }
 
         function postToParent(m) {
@@ -243,13 +306,11 @@
         }
 
         function showCurtain() {
-            playbackConfirmed = false;
             curtain.classList.remove('hidden');
             player.classList.remove('vds-visible');
         }
 
         function hideCurtain() {
-            playbackConfirmed = true;
             curtain.classList.add('hidden');
             player.classList.add('vds-visible');
         }
@@ -280,22 +341,25 @@
         }
 
         function triggerFatalError(code) {
-            if (playbackConfirmed && player && player.currentTime > 1.0 && !player.paused) {
-                return;
-            }
-
+            if (player && player.currentTime > 1.0 && !player.paused) return;
             if (isFatalError) return;
             isFatalError = true;
 
             player.classList.remove('vds-visible');
             curtain.classList.add('hidden');
 
+            const num = Number(code);
+            let reason = 'No se pudo reproducir este video en la sala.';
+            if (num === 2) reason = 'El enlace o ID del video no es válido.';
+            if (num === 100) reason = 'El video fue eliminado o es privado.';
+            if (num === 101 || num === 150) reason = 'Este video tiene restricción de derechos de autor o inserción bloqueada.';
+
             errorTitle.textContent = 'Video no disponible';
-            errorReason.textContent = getReadableErrorReason(code);
+            errorReason.textContent = reason;
             errorOverlay.classList.add('active');
 
             try { player.pause(); } catch (e) {}
-            postToParent({ type: 'error', code: Number(code) || 150, videoId: currentVid });
+            postToParent({ type: 'error', code: num || 150, videoId: currentVid });
             startCountdown();
         }
 
@@ -317,41 +381,59 @@
 
         function notifyEnded() {
             if (endedReported) return;
-            // Solo marcar ended si realmente se tiene duración y estamos cerca del final (>95% o dentro de los últimos 2 segs)
             if (player && player.duration && player.duration > 5) {
-                if (player.currentTime < player.duration - 2.5) {
-                    return; // Falso positivo de fin
-                }
+                if (player.currentTime < player.duration - 2.5) return;
             }
             endedReported = true;
             lastExpectedAutoplay = false;
             postToParent({ type: 'ended', videoId: currentVid });
         }
 
-        // Intercepción de mensajes del IFrame interno de YouTube
-        window.addEventListener('message', function (ev) {
-            try {
-                let data = ev.data;
-                if (typeof data === 'string') data = JSON.parse(data);
-                if (!data) return;
+        function updateProgressUI() {
+            if (!player || isFatalError) return;
+            const cur = Math.max(0, Number(player.currentTime) || 0);
+            const dur = Math.max(0, Number(player.duration) || 0);
 
-                if (data.event === 'onStateChange') {
-                    if (data.info === 1 || data.data === 1) { // PLAYING
-                        onPlaybackSuccess();
-                    } else if (data.info === 0 || data.data === 0) { // ENDED
-                        notifyEnded();
-                    }
-                } else if (data.event === 'infoDelivery' && data.info) {
-                    if (data.info.playerState === 1) {
-                        onPlaybackSuccess();
-                    } else if (data.info.playerState === 0) {
-                        notifyEnded();
-                    }
-                } else if (data.event === 'onError') {
-                    const code = data.info || (data.data && data.data.code) || 150;
-                    triggerFatalError(code);
+            if (dur > 0) {
+                progressSlider.disabled = false;
+                progressSlider.max = dur;
+                if (!isDraggingProgress) {
+                    progressSlider.value = cur;
                 }
-            } catch (err) {}
+                curTimeEl.textContent = fmtDuration(cur);
+                durTimeEl.textContent = fmtDuration(dur);
+            } else {
+                progressSlider.disabled = true;
+                progressSlider.value = 0;
+                curTimeEl.textContent = (cur > 0) ? fmtDuration(cur) : '--:--';
+                durTimeEl.textContent = '--:--';
+            }
+        }
+
+        function showControlsTemp() {
+            host.classList.add('show-controls');
+            if (hideControlsTimer) clearTimeout(hideControlsTimer);
+            hideControlsTimer = setTimeout(function () {
+                host.classList.remove('show-controls');
+                hideControlsTimer = null;
+            }, 1800);
+        }
+
+        host.addEventListener('mousemove', showControlsTemp);
+        host.addEventListener('touchstart', showControlsTemp, { passive: true });
+
+        progressSlider.addEventListener('input', function () {
+            isDraggingProgress = true;
+            curTimeEl.textContent = fmtDuration(this.value);
+        });
+
+        progressSlider.addEventListener('change', function () {
+            const target = Number(this.value) || 0;
+            if (player) {
+                try { player.currentTime = target; } catch (e) {}
+            }
+            postToParent({ type: 'user_seek', videoId: currentVid, time: target });
+            isDraggingProgress = false;
         });
 
         function safePlay() {
@@ -363,14 +445,32 @@
         }
 
         function reportDuration() {
-            if (!player) return false;
+            if (!player) return;
             const d = player.duration;
             if (d && isFinite(d) && d > 0 && !isFatalError) {
+                updateProgressUI();
                 postToParent({ type: 'duration', videoId: currentVid, duration: d });
-                return true;
             }
-            return false;
         }
+
+        // Intercepción de mensajes del IFrame de YouTube
+        window.addEventListener('message', function (ev) {
+            try {
+                let data = ev.data;
+                if (typeof data === 'string') data = JSON.parse(data);
+                if (!data) return;
+
+                if (data.event === 'onStateChange') {
+                    if (data.info === 1 || data.data === 1) onPlaybackSuccess();
+                    else if (data.info === 0 || data.data === 0) notifyEnded();
+                } else if (data.event === 'infoDelivery' && data.info) {
+                    if (data.info.playerState === 1) onPlaybackSuccess();
+                    else if (data.info.playerState === 0) notifyEnded();
+                } else if (data.event === 'onError') {
+                    triggerFatalError(data.info || (data.data && data.data.code) || 150);
+                }
+            } catch (err) {}
+        });
 
         if (player) {
             if (autoplay !== '1') player.removeAttribute('autoplay');
@@ -397,6 +497,8 @@
             player.addEventListener('time-update', function () {
                 if (player.currentTime > 0.05 && !isFatalError) {
                     onPlaybackSuccess();
+                    updateProgressUI();
+
                     const nowSec = player.currentTime;
                     if (Math.abs(nowSec - lastReportedTime) >= 1.5) {
                         lastReportedTime = nowSec;
@@ -412,9 +514,7 @@
             });
 
             player.addEventListener('playing', function () {
-                if (!isFatalError) {
-                    onPlaybackSuccess();
-                }
+                if (!isFatalError) onPlaybackSuccess();
             });
 
             player.addEventListener('error', function (ev) {
@@ -442,7 +542,7 @@
             });
             player.addEventListener('can-play', reportDuration);
 
-            // Mensajes recibidos desde room-music.js
+            // Mensajes entrantes desde room-music.js
             window.addEventListener('message', function (ev) {
                 const data = ev.data;
                 if (!data || typeof data !== 'object' || data.source !== 'voice-eva') return;
@@ -455,8 +555,8 @@
                                 currentVid = data.videoId;
                                 endedReported = false;
                                 reportedReady = false;
-                                playbackConfirmed = false;
                                 lastReportedTime = 0;
+                                updateProgressUI();
                                 player.src = 'youtube/' + data.videoId;
 
                                 if (data.autoplay) {
@@ -474,9 +574,7 @@
                                     if (loadStart > 0) {
                                         try { player.currentTime = loadStart; } catch (e) {}
                                     }
-                                    if (lastExpectedAutoplay) {
-                                        safePlay();
-                                    }
+                                    if (lastExpectedAutoplay) safePlay();
                                 };
                                 player.addEventListener('can-play', onCanPlay);
                             }
@@ -499,6 +597,7 @@
                                 const targetTime = Math.max(0, Number(data.time) || 0);
                                 if (Math.abs(player.currentTime - targetTime) > 1.5) {
                                     player.currentTime = targetTime;
+                                    updateProgressUI();
                                 }
                             }
                             break;
@@ -508,6 +607,7 @@
                             lastExpectedAutoplay = false;
                             try { player.pause(); } catch (e) {}
                             player.currentTime = 0;
+                            updateProgressUI();
                             break;
                         case 'mute':
                             player.muted = true;
