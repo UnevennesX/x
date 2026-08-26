@@ -6,10 +6,9 @@
     <meta name="referrer" content="strict-origin-when-cross-origin">
     <title>Player</title>
 
-    <!-- Vidstack Player & Default Layout -->
-    <link rel="stylesheet" href="https://cdn.vidstack.io/player/default/theme.css">
-    <link rel="stylesheet" href="https://cdn.vidstack.io/player/default/layouts/video.css">
-    <script type="module" src="https://cdn.vidstack.io/player/default"></script>
+    <!-- Vidstack Player CSS & JS Oficiales (Sin 404) -->
+    <link rel="stylesheet" href="https://cdn.vidstack.io/player/theme.css">
+    <link rel="stylesheet" href="https://cdn.vidstack.io/player/video.css">
     <script type="module" src="https://cdn.vidstack.io/player"></script>
     
     <link rel="preconnect" href="https://www.google.com" crossorigin="true">
@@ -42,7 +41,6 @@
             overflow: hidden;
         }
 
-        /* Reproductor completamente oculto hasta confirmar reproducción real */
         #rmExternalPlayer {
             width: 100% !important;
             height: 100% !important;
@@ -51,7 +49,7 @@
             background-color: #000000;
             opacity: 0;
             visibility: hidden;
-            transition: opacity 0.25s ease;
+            transition: opacity 0.2s ease;
         }
 
         #rmExternalPlayer.vds-visible {
@@ -59,7 +57,6 @@
             visibility: visible;
         }
 
-        /* Control de tamaño estricto para evitar íconos desbordados */
         media-player, media-player * {
             max-width: 100%;
         }
@@ -70,7 +67,7 @@
             border: none;
         }
 
-        /* Cortina Protectora: Bloquea cualquier destello nativo de YouTube */
+        /* Cortina Protectora */
         .rm-curtain {
             position: absolute;
             inset: 0;
@@ -103,7 +100,6 @@
             to { transform: rotate(360deg); }
         }
 
-        /* Estado en espera */
         .rm-idle-layer {
             position: absolute;
             inset: 0;
@@ -120,7 +116,7 @@
             display: flex;
         }
 
-        /* Capa de Error: Nivel superior absoluto */
+        /* Capa de Error */
         .rm-error-layer {
             position: absolute;
             inset: 0;
@@ -203,7 +199,7 @@
 </head>
 <body>
     <div id="playerHost">
-        <!-- Cortina de carga inicial -->
+        <!-- Cortina inicial -->
         <div id="rmCurtain" class="rm-curtain">
             <div class="rm-spinner"></div>
         </div>
@@ -214,12 +210,12 @@
         </div>
 
         <!-- Reproductor Vidstack -->
-        <media-player id="rmExternalPlayer" load="eager" playsinline crossorigin>
+        <media-player id="rmExternalPlayer" playsinline crossorigin>
             <media-provider></media-provider>
             <media-video-layout></media-video-layout>
         </media-player>
 
-        <!-- Capa de Error Limpia -->
+        <!-- Capa de Error -->
         <div id="rmErrorOverlay" class="rm-error-layer">
             <div class="rm-error-box">
                 <div id="rmErrorTitle" class="rm-error-title">No se pudo reproducir</div>
@@ -250,7 +246,7 @@
         const countdownSec = document.getElementById('rmCountdownSec');
         const btnSkip = document.getElementById('rmBtnSkip');
 
-        let currentVid = initialVideoId;
+        let currentVid = null;
         let isFatalError = false;
         let hasNextInQueue = false;
         let countdownTimer = null;
@@ -259,6 +255,13 @@
         let endedThisVideo = false;
         let endedReported = false;
         let lastExpectedAutoplay = false;
+
+        function extractYouTubeId(urlOrId) {
+            if (!urlOrId) return '';
+            const match = String(urlOrId).match(/(?:youtu\.be\/|youtube\.com\/(?:embed\/|v\/|watch\?v=|watch\?.+&v=))([\w-]{11})/);
+            if (match && match[1]) return match[1];
+            return String(urlOrId).trim();
+        }
 
         function getRealErrorMessage(code, rawMsg) {
             if (rawMsg && typeof rawMsg === 'string' && rawMsg.trim().length > 0 && !rawMsg.includes('[object')) {
@@ -273,7 +276,7 @@
                 case 2:
                     return {
                         title: 'Parámetro no válido',
-                        reason: 'El identificador del video contiene caracteres no válidos o es incorrecto.'
+                        reason: 'El ID del video contiene caracteres no válidos o es incorrecto.'
                     };
                 case 5:
                     return {
@@ -346,7 +349,7 @@
                 if (!reportedReady && !isFatalError) {
                     triggerCustomError(408, 'Tiempo de espera agotado al conectar con el servidor.');
                 }
-            }, 12000);
+            }, 14000);
         }
 
         function clearHangWatchdog() {
@@ -381,7 +384,7 @@
             clearHangWatchdog();
             isFatalError = true;
 
-            // Ocultar iframe para que jamás se vea el error nativo roto
+            // Oculta el reproductor para que jamás destelle el iframe nativo
             player.classList.remove('vds-visible');
             curtain.classList.add('hidden');
 
@@ -412,7 +415,7 @@
             postToParent({ type: 'skip_fatal', videoId: currentVid });
         }
 
-        // Intercepta mensajes del iframe de YouTube al instante
+        // Intercepción inmediata de errores de YouTube
         window.addEventListener('message', function (ev) {
             try {
                 let data = ev.data;
@@ -440,16 +443,9 @@
             } catch (e) {}
         }
 
-        function formatYouTubeSrc(idOrUrl) {
-            if (!idOrUrl) return '';
-            if (idOrUrl.startsWith('http://') || idOrUrl.startsWith('https://')) {
-                return idOrUrl;
-            }
-            return `https://www.youtube.com/watch?v=${idOrUrl}`;
-        }
-
         function loadVideo(vid, shouldAutoplay, seekTime) {
-            if (!vid) {
+            const cleanId = extractYouTubeId(vid);
+            if (!cleanId) {
                 hideCurtain();
                 idleOverlay.classList.add('active');
                 return;
@@ -459,7 +455,7 @@
             showCurtain();
             clearHangWatchdog();
 
-            currentVid = vid;
+            currentVid = cleanId;
             endedThisVideo = false;
             endedReported = false;
             reportedReady = false;
@@ -471,12 +467,13 @@
                 player.removeAttribute('autoplay');
             }
 
-            player.src = formatYouTubeSrc(vid);
+            // Carga nativa de YouTube en Vidstack
+            player.src = 'youtube/' + cleanId;
             startHangWatchdog();
 
             const startTimeSec = Math.max(0, Number(seekTime) || 0);
-            const onReadyToPlay = function () {
-                player.removeEventListener('can-play', onReadyToPlay);
+            const onReady = function () {
+                player.removeEventListener('can-play', onReady);
                 if (startTimeSec > 0) {
                     try { player.currentTime = startTimeSec; } catch (e) {}
                 }
@@ -484,21 +481,22 @@
                     safePlay();
                 }
             };
-            player.addEventListener('can-play', onReadyToPlay);
+            player.addEventListener('can-play', onReady);
         }
 
-        // ÚNICAMENTE mostrar el reproductor cuando realmente se confirma la reproducción
         function onPlaybackConfirmed() {
             if (isFatalError) return;
             clearHangWatchdog();
             hideOverlay();
             hideCurtain();
+
             if (!reportedReady) {
                 reportedReady = true;
                 postToParent({ type: 'ready' });
             }
         }
 
+        player.addEventListener('can-play', onPlaybackConfirmed);
         player.addEventListener('playing', onPlaybackConfirmed);
         player.addEventListener('time-update', function () {
             if (player.currentTime > 0.05 && !isFatalError) {
@@ -550,7 +548,7 @@
             idleOverlay.classList.add('active');
         }
 
-        // Control desde ventana padre
+        // Mensajes recibidos
         window.addEventListener('message', function (ev) {
             const data = ev.data;
             if (!data || typeof data !== 'object' || data.source !== 'voice-eva') return;
