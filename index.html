@@ -379,10 +379,7 @@
         }
 
         function notifyEnded() {
-            if (endedReported) return;
-            if (player && player.duration && player.duration > 5) {
-                if (player.currentTime < player.duration - 2.5) return;
-            }
+            if (endedReported || isFatalError) return;
             endedReported = true;
             shouldAutoplay = false;
             postToParent({ type: 'ended', videoId: currentVid });
@@ -489,6 +486,16 @@
             player.addEventListener('can-play', attemptStart, { once: true });
             setTimeout(attemptStart, 800);
         }
+
+        // Vigilante continuo de fin de pista (evita quedarse trabado en 4:11 / 4:11)
+        setInterval(function () {
+            if (endedReported || isFatalError || !player) return;
+            const cur = player.currentTime;
+            const dur = player.duration;
+            if (dur && dur > 3 && cur >= (dur - 0.75)) {
+                notifyEnded();
+            }
+        }, 400);
 
         // Intercepción de mensajes del IFrame de YouTube
         window.addEventListener('message', function (ev) {
