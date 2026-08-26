@@ -237,7 +237,6 @@
             <media-provider></media-provider>
         </media-player>
 
-        <!-- Barra de Progreso Integrada al Reproductor -->
         <div class="rm-native-progress" id="rmNativeProgress">
             <span id="rmCurTime">--:--</span>
             <input type="range" id="rmProgressSlider" class="rm-native-slider" min="0" max="100" step="0.1" value="0" disabled>
@@ -331,7 +330,7 @@
 
             countdownTimer = setInterval(function () {
                 countdownSec--;
-                countdownNumber.textContent = countdownSec;
+                if (countdownNumber) countdownNumber.textContent = Math.max(0, countdownSec);
                 if (countdownSec <= 0) {
                     clearInterval(countdownTimer);
                     countdownTimer = null;
@@ -341,7 +340,7 @@
         }
 
         function triggerFatalError(code) {
-            if (player && player.currentTime > 1.0 && !player.paused) return;
+            if (player && player.currentTime > 1.5 && !player.paused) return;
             if (isFatalError) return;
             isFatalError = true;
 
@@ -359,7 +358,7 @@
             errorOverlay.classList.add('active');
 
             try { player.pause(); } catch (e) {}
-            postToParent({ type: 'error', code: num || 150, videoId: currentVid });
+            // Inicia la cuenta regresiva visible y salta únicamente al llegar a 0
             startCountdown();
         }
 
@@ -542,7 +541,6 @@
             });
             player.addEventListener('can-play', reportDuration);
 
-            // Mensajes entrantes desde room-music.js
             window.addEventListener('message', function (ev) {
                 const data = ev.data;
                 if (!data || typeof data !== 'object' || data.source !== 'voice-eva') return;
