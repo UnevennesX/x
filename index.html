@@ -90,73 +90,6 @@
             to { transform: rotate(360deg); }
         }
 
-        /* Capa de Error */
-        .rm-error-layer {
-            position: absolute;
-            inset: 0;
-            z-index: 100;
-            background-color: #121212;
-            display: none;
-            align-items: center;
-            justify-content: center;
-            padding: 24px;
-        }
-
-        .rm-error-layer.active {
-            display: flex !important;
-        }
-
-        .rm-yt-error-box {
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            justify-content: center;
-            text-align: center;
-            max-width: 460px;
-            width: 100%;
-            gap: 14px;
-        }
-
-        .rm-yt-icon {
-            width: 52px;
-            height: 52px;
-            color: #e03131;
-            margin-bottom: 2px;
-        }
-
-        .rm-yt-details {
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            text-align: center;
-            gap: 6px;
-            width: 100%;
-        }
-
-        .rm-yt-title {
-            font-size: 1.25rem;
-            font-weight: 700;
-            color: #f1f1f1;
-            line-height: 1.25;
-        }
-
-        .rm-yt-reason {
-            font-size: 0.88rem;
-            line-height: 1.45;
-            color: #aaaaaa;
-            max-width: 360px;
-        }
-
-        .rm-yt-countdown-msg {
-            margin-top: 10px;
-            font-size: 0.84rem;
-            color: #888888;
-        }
-
-        .rm-yt-countdown-msg strong {
-            color: #f1f1f1;
-            font-weight: 700;
-        }
     </style>
 </head>
 <body>
@@ -169,23 +102,6 @@
             <media-provider></media-provider>
         </media-player>
 
-        <div id="rmErrorOverlay" class="rm-error-layer">
-            <div class="rm-yt-error-box">
-                <svg class="rm-yt-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                    <circle cx="12" cy="12" r="10"></circle>
-                    <line x1="12" y1="8" x2="12" y2="12"></line>
-                    <line x1="12" y1="16" x2="12.01" y2="16"></line>
-                </svg>
-
-                <div class="rm-yt-details">
-                    <h2 class="rm-yt-title" id="rmErrorTitle">Video no disponible</h2>
-                    <p class="rm-yt-reason" id="rmErrorReason">Este video tiene restricción de derechos de autor o inserción bloqueada.</p>
-                    <p class="rm-yt-countdown-msg" id="rmCountdownBox">
-                        Saltando video en <strong id="rmCountdownNumber">3</strong> s...
-                    </p>
-                </div>
-            </div>
-        </div>
     </div>
 
     <script>
@@ -197,20 +113,11 @@
         const player = document.getElementById('rmExternalPlayer');
         const curtain = document.getElementById('rmCurtain');
 
-        const errorOverlay = document.getElementById('rmErrorOverlay');
-        const errorTitle = document.getElementById('rmErrorTitle');
-        const errorReason = document.getElementById('rmErrorReason');
-        const countdownNumber = document.getElementById('rmCountdownNumber');
-
-        let countdownTimer = null;
-        let countdownSec = 3;
         let currentVid = videoId || null;
         let shouldAutoplay = autoplay === '1';
-        let isFatalError = false;
         let endedReported = false;
         let reportedReady = false;
         let trackToken = 0;
-        let loadFailureTimer = null;
         let lastReportedTime = 0;
         let pendingStartTime = startTime;
 
@@ -228,69 +135,7 @@
             player.classList.add('vds-visible');
         }
 
-        function hideErrorOverlay() {
-            if (countdownTimer) {
-                clearInterval(countdownTimer);
-                countdownTimer = null;
-            }
-            isFatalError = false;
-            errorOverlay.classList.remove('active');
-        }
-
-        function clearLoadFailureTimer() {
-            if (loadFailureTimer) {
-                clearTimeout(loadFailureTimer);
-                loadFailureTimer = null;
-            }
-        }
-
-        function startCountdown() {
-            if (countdownTimer) clearInterval(countdownTimer);
-            countdownSec = 3;
-            if (countdownNumber) countdownNumber.textContent = countdownSec;
-
-            countdownTimer = setInterval(function () {
-                countdownSec--;
-                if (countdownNumber) countdownNumber.textContent = Math.max(0, countdownSec);
-                if (countdownSec <= 0) {
-                    clearInterval(countdownTimer);
-                    countdownTimer = null;
-                    skipVideo();
-                }
-            }, 1000);
-        }
-
-        function triggerFatalError(code) {
-            if (isFatalError) return;
-            clearLoadFailureTimer();
-            isFatalError = true;
-
-            player.classList.remove('vds-visible');
-            curtain.classList.add('hidden');
-
-            const num = Number(code);
-            let reason = 'No se pudo reproducir este video en la sala.';
-            if (num === 2) reason = 'El enlace o ID del video no es válido.';
-            if (num === 100) reason = 'El video fue eliminado o es privado.';
-            if (num === 101 || num === 150) reason = 'Este video tiene restricción de derechos de autor o inserción bloqueada.';
-
-            errorTitle.textContent = 'Video no disponible';
-            errorReason.textContent = reason;
-            errorOverlay.classList.add('active');
-
-            try { player.pause(); } catch (e) {}
-            startCountdown();
-        }
-
-        function skipVideo() {
-            hideErrorOverlay();
-            postToParent({ type: 'skip_fatal', videoId: currentVid });
-        }
-
         function onPlaybackSuccess() {
-            if (isFatalError) return;
-            clearLoadFailureTimer();
-            hideErrorOverlay();
             hideCurtain();
 
             if (!reportedReady) {
@@ -300,7 +145,7 @@
         }
 
         function notifyEnded() {
-            if (endedReported || isFatalError) return;
+            if (endedReported) return;
             const position = player ? Number(player.currentTime) || 0 : 0;
             if (!reportedReady && position <= 0.05) return;
             endedReported = true;
@@ -309,7 +154,7 @@
         }
 
         function safePlay() {
-            if (!player || isFatalError) return;
+            if (!player) return;
             try {
                 const playPromise = player.play();
                 if (playPromise && typeof playPromise.catch === 'function') {
@@ -328,11 +173,9 @@
             endedReported = false;
             reportedReady = false;
             lastReportedTime = 0;
-            isFatalError = false;
             trackToken += 1;
             const activeToken = trackToken;
 
-            hideErrorOverlay();
             showCurtain();
             player.src = 'youtube/' + vid;
             if (shouldAutoplay) {
@@ -352,23 +195,11 @@
             player.addEventListener('loadedmetadata', attemptStart, { once: true });
             player.addEventListener('can-play', attemptStart, { once: true });
             setTimeout(attemptStart, 800);
-
-            clearLoadFailureTimer();
-            if (shouldAutoplay) {
-                loadFailureTimer = setTimeout(function () {
-                    const duration = Number(player.duration) || 0;
-                    const readyState = Number(player.readyState) || 0;
-                    const position = Number(player.currentTime) || 0;
-                    if (activeToken === trackToken && !isFatalError && duration <= 0 && readyState < 1 && position <= 0.05) {
-                        triggerFatalError(100);
-                    }
-                }, 7000);
-            }
         }
 
         // Vigilante continuo de fin de pista (evita quedarse trabado en 4:11 / 4:11)
         setInterval(function () {
-            if (endedReported || isFatalError || !player) return;
+            if (endedReported || !player) return;
             const cur = player.currentTime;
             const dur = player.duration;
             if (dur && dur > 3 && cur >= (dur - 0.75)) {
@@ -389,8 +220,6 @@
                 } else if (data.event === 'infoDelivery' && data.info) {
                     if (data.info.playerState === 1) onPlaybackSuccess();
                     else if (data.info.playerState === 0) notifyEnded();
-                } else if (data.event === 'onError') {
-                    triggerFatalError(data.info || (data.data && data.data.code) || 150);
                 }
             } catch (err) {}
         });
@@ -401,7 +230,7 @@
             }
 
             player.addEventListener('time-update', function () {
-                if (player.currentTime > 0.05 && !isFatalError) {
+                if (player.currentTime > 0.05) {
                     onPlaybackSuccess();
 
                     const nowSec = player.currentTime;
@@ -419,18 +248,7 @@
             });
 
             player.addEventListener('playing', function () {
-                if (!isFatalError) onPlaybackSuccess();
-            });
-
-            player.addEventListener('error', function (ev) {
-                const detail = ev.detail || ev;
-                let ytCode = 150;
-                if (detail) {
-                    if (typeof detail.code === 'number') ytCode = detail.code;
-                    else if (typeof detail.data === 'number') ytCode = detail.data;
-                    else if (detail.cause && typeof detail.cause.data === 'number') ytCode = detail.cause.data;
-                }
-                triggerFatalError(ytCode);
+                onPlaybackSuccess();
             });
 
             player.addEventListener('ended', notifyEnded);
@@ -448,27 +266,20 @@
                             break;
 
                         case 'play':
-                            if (!isFatalError) {
-                                shouldAutoplay = true;
-                                safePlay();
-                            }
+                            shouldAutoplay = true;
+                            safePlay();
                             break;
                         case 'pause':
-                            if (!isFatalError) {
-                                shouldAutoplay = false;
-                                try { player.pause(); } catch (e) {}
-                            }
+                            shouldAutoplay = false;
+                            try { player.pause(); } catch (e) {}
                             break;
                         case 'seek':
-                            if (!isFatalError) {
-                                const targetTime = Math.max(0, Number(data.time) || 0);
-                                if (Math.abs(player.currentTime - targetTime) > 4.0) {
-                                    player.currentTime = targetTime;
-                                }
+                            const targetTime = Math.max(0, Number(data.time) || 0);
+                            if (Math.abs(player.currentTime - targetTime) > 4.0) {
+                                player.currentTime = targetTime;
                             }
                             break;
                         case 'stop':
-                            hideErrorOverlay();
                             showCurtain();
                             shouldAutoplay = false;
                             try { player.pause(); } catch (e) {}
