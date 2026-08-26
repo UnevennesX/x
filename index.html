@@ -42,16 +42,35 @@
             overflow: hidden;
         }
 
-        /* Reproductor con carga eager */
-        media-player {
+        /* Reproductor completamente oculto hasta confirmar reproducción real */
+        #rmExternalPlayer {
             width: 100% !important;
             height: 100% !important;
             position: absolute;
             inset: 0;
             background-color: #000000;
+            opacity: 0;
+            visibility: hidden;
+            transition: opacity 0.25s ease;
         }
 
-        /* Cortina de carga inicial minimalista */
+        #rmExternalPlayer.vds-visible {
+            opacity: 1;
+            visibility: visible;
+        }
+
+        /* Control de tamaño estricto para evitar íconos desbordados */
+        media-player, media-player * {
+            max-width: 100%;
+        }
+
+        iframe {
+            width: 100% !important;
+            height: 100% !important;
+            border: none;
+        }
+
+        /* Cortina Protectora: Bloquea cualquier destello nativo de YouTube */
         .rm-curtain {
             position: absolute;
             inset: 0;
@@ -59,14 +78,16 @@
             display: flex;
             align-items: center;
             justify-content: center;
-            z-index: 10;
+            z-index: 50;
             opacity: 1;
-            transition: opacity 0.2s ease;
-            pointer-events: none;
+            visibility: visible;
+            transition: opacity 0.2s ease, visibility 0.2s ease;
         }
 
         .rm-curtain.hidden {
             opacity: 0;
+            visibility: hidden;
+            pointer-events: none;
         }
 
         .rm-spinner {
@@ -82,7 +103,7 @@
             to { transform: rotate(360deg); }
         }
 
-        /* Capa de Estado Vacío (Sin video) */
+        /* Estado en espera */
         .rm-idle-layer {
             position: absolute;
             inset: 0;
@@ -90,7 +111,7 @@
             display: none;
             align-items: center;
             justify-content: center;
-            z-index: 5;
+            z-index: 60;
             color: #555555;
             font-size: 0.88rem;
         }
@@ -99,7 +120,7 @@
             display: flex;
         }
 
-        /* Capa de Error Minimalista */
+        /* Capa de Error: Nivel superior absoluto */
         .rm-error-layer {
             position: absolute;
             inset: 0;
@@ -108,7 +129,7 @@
             align-items: center;
             justify-content: center;
             padding: 24px;
-            z-index: 20;
+            z-index: 100;
         }
 
         .rm-error-layer.active {
@@ -182,12 +203,12 @@
 </head>
 <body>
     <div id="playerHost">
-        <!-- Cortina de carga -->
+        <!-- Cortina de carga inicial -->
         <div id="rmCurtain" class="rm-curtain">
             <div class="rm-spinner"></div>
         </div>
 
-        <!-- Capa cuando no hay video cargado -->
+        <!-- Capa sin video -->
         <div id="rmIdleOverlay" class="rm-idle-layer">
             <span>En espera de video...</span>
         </div>
@@ -198,7 +219,7 @@
             <media-video-layout></media-video-layout>
         </media-player>
 
-        <!-- Capa de Error -->
+        <!-- Capa de Error Limpia -->
         <div id="rmErrorOverlay" class="rm-error-layer">
             <div class="rm-error-box">
                 <div id="rmErrorTitle" class="rm-error-title">No se pudo reproducir</div>
@@ -214,7 +235,6 @@
 
     <script>
         const urlParams = new URLSearchParams(window.location.search);
-        // Si no se especifica por parámetro, queda null (sin video predeterminado)
         const initialVideoId = urlParams.get('v') || urlParams.get('videoId') || null;
         const initialAutoplay = urlParams.get('autoplay') === '1';
         const initialStartTime = Math.max(0, Number(urlParams.get('t') || urlParams.get('time')) || 0);
@@ -301,10 +321,12 @@
         function showCurtain() {
             idleOverlay.classList.remove('active');
             curtain.classList.remove('hidden');
+            player.classList.remove('vds-visible');
         }
 
         function hideCurtain() {
             curtain.classList.add('hidden');
+            player.classList.add('vds-visible');
         }
 
         function hideOverlay() {
@@ -324,7 +346,7 @@
                 if (!reportedReady && !isFatalError) {
                     triggerCustomError(408, 'Tiempo de espera agotado al conectar con el servidor.');
                 }
-            }, 14000);
+            }, 12000);
         }
 
         function clearHangWatchdog() {
@@ -358,7 +380,10 @@
         function triggerCustomError(code, customMessage) {
             clearHangWatchdog();
             isFatalError = true;
-            hideCurtain();
+
+            // Ocultar iframe para que jamás se vea el error nativo roto
+            player.classList.remove('vds-visible');
+            curtain.classList.add('hidden');
 
             const errorInfo = getRealErrorMessage(code, customMessage);
             errorTitle.textContent = errorInfo.title;
@@ -387,13 +412,27 @@
             postToParent({ type: 'skip_fatal', videoId: currentVid });
         }
 
+        // Intercepta mensajes del iframe de YouTube al instante
+        window.addEventListener('message', function (ev) {
+            try {
+                let data = ev.data;
+                if (typeof data === 'string') data = JSON.parse(data);
+                if (data) {
+                    if (data.event === 'onError' || [2, 5, 100, 101, 150, 153, 155].includes(Number(data.info))) {
+                        const code = data.info || (data.data && data.data.code) || 150;
+                        const msg = data.data && data.data.message ? data.data.message : null;
+                        triggerCustomError(code, msg);
+                    }
+                }
+            } catch (err) {}
+        });
+
         function safePlay() {
             if (!player || isFatalError) return;
             try {
                 const p = player.play();
                 if (p && typeof p.catch === 'function') {
                     p.catch(function () {
-                        // Si el navegador bloquea autoplay con sonido, intentar reproducir silenciado
                         player.muted = true;
                         player.play().catch(function () {});
                     });
@@ -401,7 +440,6 @@
             } catch (e) {}
         }
 
-        // Formatea la URL correctamente para Vidstack
         function formatYouTubeSrc(idOrUrl) {
             if (!idOrUrl) return '';
             if (idOrUrl.startsWith('http://') || idOrUrl.startsWith('https://')) {
@@ -449,8 +487,8 @@
             player.addEventListener('can-play', onReadyToPlay);
         }
 
-        // Eventos del reproductor
-        function onPlaybackSuccess() {
+        // ÚNICAMENTE mostrar el reproductor cuando realmente se confirma la reproducción
+        function onPlaybackConfirmed() {
             if (isFatalError) return;
             clearHangWatchdog();
             hideOverlay();
@@ -461,14 +499,10 @@
             }
         }
 
-        player.addEventListener('provider-change', function () {
-            hideCurtain();
-        });
-        player.addEventListener('can-play', onPlaybackSuccess);
-        player.addEventListener('playing', onPlaybackSuccess);
+        player.addEventListener('playing', onPlaybackConfirmed);
         player.addEventListener('time-update', function () {
             if (player.currentTime > 0.05 && !isFatalError) {
-                onPlaybackSuccess();
+                onPlaybackConfirmed();
             }
         });
 
@@ -516,23 +550,10 @@
             idleOverlay.classList.add('active');
         }
 
-        // Comunicación por postMessage
+        // Control desde ventana padre
         window.addEventListener('message', function (ev) {
-            let data = ev.data;
-            if (typeof data === 'string') {
-                try { data = JSON.parse(data); } catch (e) {}
-            }
-            if (!data || typeof data !== 'object') return;
-
-            // Errores directos desde iframe YouTube
-            if (data.event === 'onError' || [2, 5, 100, 101, 150, 153, 155].includes(Number(data.info))) {
-                const code = data.info || (data.data && data.data.code) || 150;
-                const msg = data.data && data.data.message ? data.data.message : null;
-                triggerCustomError(code, msg);
-                return;
-            }
-
-            if (data.source !== 'voice-eva') return;
+            const data = ev.data;
+            if (!data || typeof data !== 'object' || data.source !== 'voice-eva') return;
 
             switch (data.type) {
                 case 'load':
