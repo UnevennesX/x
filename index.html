@@ -4,16 +4,16 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <meta name="referrer" content="no-referrer-when-downgrade">
-    <title>Vidstack Player (Sin Interfaz)</title>
+    <title>Vidstack Player (Sin Anuncios / No-Cookie)</title>
 
-    <!-- Vidstack Core (Sin librerías de UI ni layouts) -->
+    <!-- Vidstack Core (Sin interfaz) -->
     <link rel="stylesheet" href="https://cdn.vidstack.io/player/theme.css">
     <link rel="stylesheet" href="https://cdn.vidstack.io/player/video.css">
     <script type="module" src="https://cdn.vidstack.io/player"></script>
 
-    <link rel="preconnect" href="https://www.google.com" crossorigin="true">
+    <!-- Conexión exclusiva a servidores sin cookies (No Ads) -->
+    <link rel="preconnect" href="https://www.youtube-nocookie.com" crossorigin="true">
     <link rel="preconnect" href="https://i.ytimg.com" crossorigin="true">
-    <link rel="preconnect" href="https://www.youtube.com" crossorigin="true">
 
     <style>
         * {
@@ -415,11 +415,11 @@
             postToParent({ type: 'skip_fatal', videoId: currentVid });
         }
 
-        // Configuración interna de Vidstack cuando conecta con YouTube
+        // Configuración para forzar YouTube No-Cookie (Sin tracking ni anuncios de terceros)
         player.addEventListener('provider-change', function (ev) {
             const provider = ev.detail;
             if (provider && provider.type === 'youtube') {
-                provider.cookies = true;
+                provider.cookies = false; // Carga desde youtube-nocookie.com
             }
         });
 
@@ -475,7 +475,7 @@
                 player.removeAttribute('autoplay');
             }
 
-            // Vidstack YouTube source
+            // Carga de YouTube en Vidstack
             player.src = 'youtube/' + cleanId;
             startHangWatchdog();
 
