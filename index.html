@@ -4,14 +4,14 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <meta name="referrer" content="no-referrer-when-downgrade">
-    <title>Vidstack Player (Sin Anuncios / No-Cookie)</title>
+    <title>Vidstack Core Player</title>
 
-    <!-- Vidstack Core (Sin interfaz) -->
+    <!-- Vidstack Core Web Components (https://vidstack.io/docs/wc/player/components/core/player/) -->
     <link rel="stylesheet" href="https://cdn.vidstack.io/player/theme.css">
     <link rel="stylesheet" href="https://cdn.vidstack.io/player/video.css">
     <script type="module" src="https://cdn.vidstack.io/player"></script>
 
-    <!-- Conexión exclusiva a servidores sin cookies (No Ads) -->
+    <!-- Preconexión sin rastreo -->
     <link rel="preconnect" href="https://www.youtube-nocookie.com" crossorigin="true">
     <link rel="preconnect" href="https://i.ytimg.com" crossorigin="true">
 
@@ -41,7 +41,7 @@
             overflow: hidden;
         }
 
-        /* Vidstack Player Puro (Sin Interfaz) */
+        /* Reproductor Vidstack Core (Headless) */
         media-player {
             width: 100% !important;
             height: 100% !important;
@@ -118,7 +118,7 @@
             display: flex;
         }
 
-        /* Capa de Error */
+        /* Capa de Error Minimalista */
         .rm-error-layer {
             position: absolute;
             inset: 0;
@@ -206,17 +206,17 @@
             <div class="rm-spinner"></div>
         </div>
 
-        <!-- Capa sin video -->
+        <!-- Capa sin video cargado -->
         <div id="rmIdleOverlay" class="rm-idle-layer">
             <span>En espera de video...</span>
         </div>
 
-        <!-- Vidstack Player Puro (Sin Interfaz) -->
+        <!-- Componente Oficial Core de Vidstack (Headless) -->
         <media-player id="rmExternalPlayer" playsinline crossorigin>
             <media-provider></media-provider>
         </media-player>
 
-        <!-- Capa de Error Minimalista -->
+        <!-- Capa de Error -->
         <div id="rmErrorOverlay" class="rm-error-layer">
             <div class="rm-error-box">
                 <div id="rmErrorTitle" class="rm-error-title">No se pudo reproducir</div>
@@ -415,15 +415,15 @@
             postToParent({ type: 'skip_fatal', videoId: currentVid });
         }
 
-        // Configuración para forzar YouTube No-Cookie (Sin tracking ni anuncios de terceros)
+        // Configuración oficial de Vidstack para YouTube (Desactiva cookies y bloquea anuncios de terceros)
         player.addEventListener('provider-change', function (ev) {
             const provider = ev.detail;
             if (provider && provider.type === 'youtube') {
-                provider.cookies = false; // Carga desde youtube-nocookie.com
+                provider.cookies = false; // Fuerza youtube-nocookie.com
             }
         });
 
-        // Intercepción inmediata de errores provenientes del iframe
+        // Intercepción inmediata de errores en el iframe
         window.addEventListener('message', function (ev) {
             try {
                 let data = ev.data;
@@ -475,7 +475,7 @@
                 player.removeAttribute('autoplay');
             }
 
-            // Carga de YouTube en Vidstack
+            // Asignación de fuente en Vidstack
             player.src = 'youtube/' + cleanId;
             startHangWatchdog();
 
@@ -545,8 +545,8 @@
             return false;
         }
 
-        player.addEventListener('durationchange', reportDuration);
-        player.addEventListener('loadedmetadata', reportDuration);
+        player.addEventListener('duration-change', reportDuration);
+        player.addEventListener('loaded-metadata', reportDuration);
 
         // Inicialización
         if (initialVideoId) {
@@ -556,7 +556,7 @@
             idleOverlay.classList.add('active');
         }
 
-        // Mensajes recibidos
+        // Comunicación por postMessage
         window.addEventListener('message', function (ev) {
             const data = ev.data;
             if (!data || typeof data !== 'object' || data.source !== 'voice-eva') return;
