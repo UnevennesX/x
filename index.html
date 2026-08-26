@@ -6,14 +6,15 @@
     <meta name="referrer" content="strict-origin-when-cross-origin">
     <title>Player</title>
 
-    <!-- Vidstack Player CSS & JS -->
-    <link rel="stylesheet" href="https://cdn.vidstack.io/player/theme.css">
-    <link rel="stylesheet" href="https://cdn.vidstack.io/player/video.css">
+    <!-- Vidstack Player & Default Layout -->
+    <link rel="stylesheet" href="https://cdn.vidstack.io/player/default/theme.css">
+    <link rel="stylesheet" href="https://cdn.vidstack.io/player/default/layouts/video.css">
+    <script type="module" src="https://cdn.vidstack.io/player/default"></script>
     <script type="module" src="https://cdn.vidstack.io/player"></script>
-    <script type="module" src="https://cdn.vidstack.io/icons"></script>
     
     <link rel="preconnect" href="https://www.google.com" crossorigin="true">
     <link rel="preconnect" href="https://i.ytimg.com" crossorigin="true">
+    <link rel="preconnect" href="https://www.youtube.com" crossorigin="true">
 
     <style>
         * {
@@ -41,22 +42,16 @@
             overflow: hidden;
         }
 
-        #rmExternalPlayer {
+        /* Reproductor con carga eager */
+        media-player {
             width: 100% !important;
             height: 100% !important;
             position: absolute;
             inset: 0;
-            visibility: hidden;
-            opacity: 0;
-            transition: opacity 0.2s ease;
+            background-color: #000000;
         }
 
-        #rmExternalPlayer.vds-visible {
-            visibility: visible;
-            opacity: 1;
-        }
-
-        /* Cortina de carga minimalista */
+        /* Cortina de carga inicial minimalista */
         .rm-curtain {
             position: absolute;
             inset: 0;
@@ -65,12 +60,13 @@
             align-items: center;
             justify-content: center;
             z-index: 10;
+            opacity: 1;
             transition: opacity 0.2s ease;
+            pointer-events: none;
         }
 
         .rm-curtain.hidden {
             opacity: 0;
-            pointer-events: none;
         }
 
         .rm-spinner {
@@ -84,6 +80,23 @@
 
         @keyframes spin {
             to { transform: rotate(360deg); }
+        }
+
+        /* Capa de Estado Vacío (Sin video) */
+        .rm-idle-layer {
+            position: absolute;
+            inset: 0;
+            background-color: #000000;
+            display: none;
+            align-items: center;
+            justify-content: center;
+            z-index: 5;
+            color: #555555;
+            font-size: 0.88rem;
+        }
+
+        .rm-idle-layer.active {
+            display: flex;
         }
 
         /* Capa de Error Minimalista */
@@ -174,8 +187,13 @@
             <div class="rm-spinner"></div>
         </div>
 
+        <!-- Capa cuando no hay video cargado -->
+        <div id="rmIdleOverlay" class="rm-idle-layer">
+            <span>En espera de video...</span>
+        </div>
+
         <!-- Reproductor Vidstack -->
-        <media-player id="rmExternalPlayer" playsinline>
+        <media-player id="rmExternalPlayer" load="eager" playsinline crossorigin>
             <media-provider></media-provider>
             <media-video-layout></media-video-layout>
         </media-player>
@@ -196,12 +214,14 @@
 
     <script>
         const urlParams = new URLSearchParams(window.location.search);
-        const videoId = urlParams.get('v') || urlParams.get('videoId') || 'M7lc1UVf-VE';
-        const autoplay = urlParams.get('autoplay') || '0';
-        const startTime = Math.max(0, Number(urlParams.get('t') || urlParams.get('time')) || 0);
+        // Si no se especifica por parámetro, queda null (sin video predeterminado)
+        const initialVideoId = urlParams.get('v') || urlParams.get('videoId') || null;
+        const initialAutoplay = urlParams.get('autoplay') === '1';
+        const initialStartTime = Math.max(0, Number(urlParams.get('t') || urlParams.get('time')) || 0);
 
         const player = document.getElementById('rmExternalPlayer');
         const curtain = document.getElementById('rmCurtain');
+        const idleOverlay = document.getElementById('rmIdleOverlay');
         const errorOverlay = document.getElementById('rmErrorOverlay');
         const errorTitle = document.getElementById('rmErrorTitle');
         const errorReason = document.getElementById('rmErrorReason');
@@ -210,7 +230,7 @@
         const countdownSec = document.getElementById('rmCountdownSec');
         const btnSkip = document.getElementById('rmBtnSkip');
 
-        let currentVid = videoId;
+        let currentVid = initialVideoId;
         let isFatalError = false;
         let hasNextInQueue = false;
         let countdownTimer = null;
@@ -220,7 +240,6 @@
         let endedReported = false;
         let lastExpectedAutoplay = false;
 
-        // Mapeo a mensajes reales basados en la especificación oficial de la API de YouTube
         function getRealErrorMessage(code, rawMsg) {
             if (rawMsg && typeof rawMsg === 'string' && rawMsg.trim().length > 0 && !rawMsg.includes('[object')) {
                 return {
@@ -244,24 +263,24 @@
                 case 100:
                     return {
                         title: 'Video no encontrado',
-                        reason: 'El video no existe, ha sido eliminado o está configurado como privado.'
+                        reason: 'El video no existe, ha sido eliminado o está marcado como privado.'
                     };
                 case 101:
                 case 150:
                     return {
                         title: 'Inserción no permitida',
-                        reason: 'El propietario del video no permite reproducirlo en reproductores externos o sitios web.'
+                        reason: 'El propietario del video no permite reproducirlo fuera de YouTube.'
                     };
                 case 153:
                 case 155:
                     return {
                         title: 'Restricción de región',
-                        reason: 'El video no está disponible en este país o dominio.'
+                        reason: 'Este video no está disponible en este sitio o país.'
                     };
                 case 408:
                     return {
                         title: 'Tiempo de espera agotado',
-                        reason: 'El video tardó demasiado en responder o la conexión fue interrumpida.'
+                        reason: 'El video tardó demasiado en responder al conectar.'
                     };
                 default:
                     return {
@@ -280,12 +299,12 @@
         }
 
         function showCurtain() {
+            idleOverlay.classList.remove('active');
             curtain.classList.remove('hidden');
         }
 
         function hideCurtain() {
             curtain.classList.add('hidden');
-            player.classList.add('vds-visible');
         }
 
         function hideOverlay() {
@@ -305,7 +324,7 @@
                 if (!reportedReady && !isFatalError) {
                     triggerCustomError(408, 'Tiempo de espera agotado al conectar con el servidor.');
                 }
-            }, 12000);
+            }, 14000);
         }
 
         function clearHangWatchdog() {
@@ -339,9 +358,7 @@
         function triggerCustomError(code, customMessage) {
             clearHangWatchdog();
             isFatalError = true;
-
-            player.classList.remove('vds-visible');
-            curtain.classList.add('hidden');
+            hideCurtain();
 
             const errorInfo = getRealErrorMessage(code, customMessage);
             errorTitle.textContent = errorInfo.title;
@@ -370,241 +387,204 @@
             postToParent({ type: 'skip_fatal', videoId: currentVid });
         }
 
-        // Detección de mensajes emitidos por el iframe de YouTube
-        window.addEventListener('message', function (ev) {
-            try {
-                let data = ev.data;
-                if (typeof data === 'string') data = JSON.parse(data);
-                if (data) {
-                    if (data.event === 'onError' || [2, 5, 100, 101, 150, 153, 155].includes(Number(data.info))) {
-                        const code = data.info || (data.data && data.data.code) || 150;
-                        const msg = data.data && data.data.message ? data.data.message : null;
-                        triggerCustomError(code, msg);
-                    }
-                }
-            } catch (err) {}
-        });
-
         function safePlay() {
             if (!player || isFatalError) return;
             try {
                 const p = player.play();
-                if (p && typeof p.catch === 'function') p.catch(function () {});
+                if (p && typeof p.catch === 'function') {
+                    p.catch(function () {
+                        // Si el navegador bloquea autoplay con sonido, intentar reproducir silenciado
+                        player.muted = true;
+                        player.play().catch(function () {});
+                    });
+                }
             } catch (e) {}
         }
 
-        if (player) {
-            if (autoplay !== '1') player.removeAttribute('autoplay');
-
-            if (videoId) {
-                showCurtain();
-                player.src = 'youtube/' + videoId;
-                startHangWatchdog();
-
-                if (autoplay === '1') {
-                    player.setAttribute('autoplay', '');
-                    lastExpectedAutoplay = true;
-                }
-                if (startTime > 0) {
-                    const onReadySeek = function () {
-                        player.removeEventListener('can-play', onReadySeek);
-                        try { player.currentTime = startTime; } catch (e) {}
-                    };
-                    player.addEventListener('can-play', onReadySeek);
-                }
+        // Formatea la URL correctamente para Vidstack
+        function formatYouTubeSrc(idOrUrl) {
+            if (!idOrUrl) return '';
+            if (idOrUrl.startsWith('http://') || idOrUrl.startsWith('https://')) {
+                return idOrUrl;
             }
+            return `https://www.youtube.com/watch?v=${idOrUrl}`;
+        }
 
-            function onPlaybackSuccess() {
-                if (isFatalError) return;
-                clearHangWatchdog();
-                hideOverlay();
+        function loadVideo(vid, shouldAutoplay, seekTime) {
+            if (!vid) {
                 hideCurtain();
-                if (!reportedReady) {
-                    reportedReady = true;
-                    postToParent({ type: 'ready' });
-                }
+                idleOverlay.classList.add('active');
+                return;
             }
 
-            player.addEventListener('can-play', onPlaybackSuccess);
-            player.addEventListener('playing', onPlaybackSuccess);
-            player.addEventListener('time-update', function () {
-                if (player.currentTime > 0.05 && !isFatalError) {
-                    onPlaybackSuccess();
-                }
-            });
+            hideOverlay();
+            showCurtain();
+            clearHangWatchdog();
 
-            // Captura de errores nativos desde Vidstack
-            player.addEventListener('error', function (ev) {
-                const detail = ev.detail || ev;
-                let ytCode = 150;
-                let errorMsg = null;
+            currentVid = vid;
+            endedThisVideo = false;
+            endedReported = false;
+            reportedReady = false;
+            lastExpectedAutoplay = !!shouldAutoplay;
 
-                if (detail) {
-                    if (typeof detail.code === 'number') ytCode = detail.code;
-                    else if (typeof detail.data === 'number') ytCode = detail.data;
-                    else if (detail.cause && typeof detail.cause.data === 'number') ytCode = detail.cause.data;
-
-                    if (detail.message) errorMsg = detail.message;
-                    else if (detail.cause && detail.cause.message) errorMsg = detail.cause.message;
-                }
-                triggerCustomError(ytCode, errorMsg);
-            });
-
-            player.addEventListener('ended', function () {
-                endedThisVideo = true;
-                if (!endedReported) {
-                    endedReported = true;
-                    postToParent({ type: 'ended', videoId: currentVid });
-                }
-            });
-
-            function reportDuration() {
-                const d = player.duration;
-                if (d && isFinite(d) && d > 0 && !isFatalError) {
-                    postToParent({ type: 'duration', videoId: currentVid, duration: d });
-                    return true;
-                }
-                return false;
+            if (shouldAutoplay) {
+                player.setAttribute('autoplay', '');
+            } else {
+                player.removeAttribute('autoplay');
             }
 
-            let durRetry = 0;
-            let reportInterval = null;
-            function scheduleReportDuration() {
-                durRetry = 0;
-                if (reportInterval) clearInterval(reportInterval);
-                reportInterval = setInterval(function () {
-                    if (reportDuration()) {
-                        clearInterval(reportInterval);
-                        reportInterval = null;
-                    } else {
-                        durRetry++;
-                        if (durRetry > 30) {
-                            clearInterval(reportInterval);
-                            reportInterval = null;
-                        }
-                    }
-                }, 1000);
-            }
+            player.src = formatYouTubeSrc(vid);
+            startHangWatchdog();
 
-            player.addEventListener('durationchange', reportDuration);
-            player.addEventListener('duration-change', reportDuration);
-            player.addEventListener('loadedmetadata', reportDuration);
-            player.addEventListener('can-play', scheduleReportDuration);
-
-            // Verificador de auto-play / fin de video
-            setInterval(function () {
-                if (endedThisVideo || isFatalError || errorOverlay.classList.contains('active')) {
-                    lastExpectedAutoplay = false;
-                    return;
+            const startTimeSec = Math.max(0, Number(seekTime) || 0);
+            const onReadyToPlay = function () {
+                player.removeEventListener('can-play', onReadyToPlay);
+                if (startTimeSec > 0) {
+                    try { player.currentTime = startTimeSec; } catch (e) {}
                 }
-
-                try {
-                    if (player.duration && player.currentTime >= player.duration - 1) {
-                        endedThisVideo = true;
-                        if (!endedReported) {
-                            endedReported = true;
-                            postToParent({ type: 'ended', videoId: currentVid });
-                        }
-                        lastExpectedAutoplay = false;
-                        return;
-                    }
-                } catch (e) {}
-
-                if (lastExpectedAutoplay && player.paused) {
+                if (lastExpectedAutoplay) {
                     safePlay();
                 }
-            }, 2500);
-
-            // Mensajes recibidos desde el frame padre
-            window.addEventListener('message', function (ev) {
-                const data = ev.data;
-                if (!data || typeof data !== 'object' || data.source !== 'voice-eva') return;
-                try {
-                    switch (data.type) {
-                        case 'load':
-                            if (data.videoId && data.videoId !== currentVid) {
-                                hideOverlay();
-                                showCurtain();
-                                clearHangWatchdog();
-                                currentVid = data.videoId;
-                                hasNextInQueue = !!data.hasNext;
-                                endedThisVideo = false;
-                                endedReported = false;
-                                player.src = 'youtube/' + data.videoId;
-                                startHangWatchdog();
-
-                                if (data.autoplay) {
-                                    player.setAttribute('autoplay', '');
-                                    lastExpectedAutoplay = true;
-                                } else {
-                                    player.removeAttribute('autoplay');
-                                    lastExpectedAutoplay = false;
-                                }
-
-                                const loadStart = Math.max(0, Number(data.time) || 0);
-                                const onCanPlay = function () {
-                                    player.removeEventListener('can-play', onCanPlay);
-                                    if (loadStart > 0) {
-                                        try { player.currentTime = loadStart; } catch (e) {}
-                                    }
-                                    if (lastExpectedAutoplay) {
-                                        safePlay();
-                                    }
-                                };
-                                player.addEventListener('can-play', onCanPlay);
-                                scheduleReportDuration();
-                            }
-                            break;
-
-                        case 'queue_state':
-                            hasNextInQueue = !!data.hasNext;
-                            if (isFatalError && hasNextInQueue && !countdownTimer) {
-                                startCountdown();
-                            } else if (isFatalError && !hasNextInQueue && countdownTimer) {
-                                clearInterval(countdownTimer);
-                                countdownTimer = null;
-                                countdownBox.classList.remove('visible');
-                            }
-                            break;
-
-                        case 'play':
-                            if (!isFatalError) {
-                                lastExpectedAutoplay = true;
-                                safePlay();
-                            }
-                            break;
-                        case 'pause':
-                            if (!isFatalError) {
-                                lastExpectedAutoplay = false;
-                                try { player.pause(); } catch (e) {}
-                            }
-                            break;
-                        case 'seek':
-                            if (!isFatalError) {
-                                player.currentTime = Math.max(0, Number(data.time) || 0);
-                            }
-                            break;
-                        case 'stop':
-                            hideOverlay();
-                            showCurtain();
-                            clearHangWatchdog();
-                            lastExpectedAutoplay = false;
-                            try { player.pause(); } catch (e) {}
-                            player.currentTime = 0;
-                            break;
-                        case 'mute':
-                            player.muted = true;
-                            break;
-                        case 'unmute':
-                            player.muted = false;
-                            break;
-                        case 'setVolume':
-                            player.volume = Math.max(0, Math.min(1, (Number(data.volume) || 0) / 100));
-                            break;
-                    }
-                } catch (e) {}
-            });
+            };
+            player.addEventListener('can-play', onReadyToPlay);
         }
+
+        // Eventos del reproductor
+        function onPlaybackSuccess() {
+            if (isFatalError) return;
+            clearHangWatchdog();
+            hideOverlay();
+            hideCurtain();
+            if (!reportedReady) {
+                reportedReady = true;
+                postToParent({ type: 'ready' });
+            }
+        }
+
+        player.addEventListener('provider-change', function () {
+            hideCurtain();
+        });
+        player.addEventListener('can-play', onPlaybackSuccess);
+        player.addEventListener('playing', onPlaybackSuccess);
+        player.addEventListener('time-update', function () {
+            if (player.currentTime > 0.05 && !isFatalError) {
+                onPlaybackSuccess();
+            }
+        });
+
+        player.addEventListener('error', function (ev) {
+            const detail = ev.detail || ev;
+            let ytCode = 150;
+            let errorMsg = null;
+
+            if (detail) {
+                if (typeof detail.code === 'number') ytCode = detail.code;
+                else if (typeof detail.data === 'number') ytCode = detail.data;
+                else if (detail.cause && typeof detail.cause.data === 'number') ytCode = detail.cause.data;
+
+                if (detail.message) errorMsg = detail.message;
+                else if (detail.cause && detail.cause.message) errorMsg = detail.cause.message;
+            }
+            triggerCustomError(ytCode, errorMsg);
+        });
+
+        player.addEventListener('ended', function () {
+            endedThisVideo = true;
+            if (!endedReported) {
+                endedReported = true;
+                postToParent({ type: 'ended', videoId: currentVid });
+            }
+        });
+
+        function reportDuration() {
+            const d = player.duration;
+            if (d && isFinite(d) && d > 0 && !isFatalError) {
+                postToParent({ type: 'duration', videoId: currentVid, duration: d });
+                return true;
+            }
+            return false;
+        }
+
+        player.addEventListener('durationchange', reportDuration);
+        player.addEventListener('loadedmetadata', reportDuration);
+
+        // Inicialización
+        if (initialVideoId) {
+            loadVideo(initialVideoId, initialAutoplay, initialStartTime);
+        } else {
+            hideCurtain();
+            idleOverlay.classList.add('active');
+        }
+
+        // Comunicación por postMessage
+        window.addEventListener('message', function (ev) {
+            let data = ev.data;
+            if (typeof data === 'string') {
+                try { data = JSON.parse(data); } catch (e) {}
+            }
+            if (!data || typeof data !== 'object') return;
+
+            // Errores directos desde iframe YouTube
+            if (data.event === 'onError' || [2, 5, 100, 101, 150, 153, 155].includes(Number(data.info))) {
+                const code = data.info || (data.data && data.data.code) || 150;
+                const msg = data.data && data.data.message ? data.data.message : null;
+                triggerCustomError(code, msg);
+                return;
+            }
+
+            if (data.source !== 'voice-eva') return;
+
+            switch (data.type) {
+                case 'load':
+                    hasNextInQueue = !!data.hasNext;
+                    loadVideo(data.videoId, data.autoplay, data.time);
+                    break;
+                case 'queue_state':
+                    hasNextInQueue = !!data.hasNext;
+                    if (isFatalError && hasNextInQueue && !countdownTimer) {
+                        startCountdown();
+                    } else if (isFatalError && !hasNextInQueue && countdownTimer) {
+                        clearInterval(countdownTimer);
+                        countdownTimer = null;
+                        countdownBox.classList.remove('visible');
+                    }
+                    break;
+                case 'play':
+                    if (!isFatalError) {
+                        lastExpectedAutoplay = true;
+                        safePlay();
+                    }
+                    break;
+                case 'pause':
+                    if (!isFatalError) {
+                        lastExpectedAutoplay = false;
+                        try { player.pause(); } catch (e) {}
+                    }
+                    break;
+                case 'seek':
+                    if (!isFatalError) {
+                        player.currentTime = Math.max(0, Number(data.time) || 0);
+                    }
+                    break;
+                case 'stop':
+                    hideOverlay();
+                    showCurtain();
+                    clearHangWatchdog();
+                    lastExpectedAutoplay = false;
+                    try { player.pause(); } catch (e) {}
+                    player.currentTime = 0;
+                    break;
+                case 'mute':
+                    player.muted = true;
+                    break;
+                case 'unmute':
+                    player.muted = false;
+                    break;
+                case 'setVolume':
+                    player.volume = Math.max(0, Math.min(1, (Number(data.volume) || 0) / 100));
+                    break;
+            }
+        });
     </script>
 </body>
 </html>
