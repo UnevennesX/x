@@ -6,13 +6,11 @@
     <meta name="referrer" content="strict-origin-when-cross-origin">
     <title>Player</title>
     
-    <!-- Vidstack Core -->
     <link rel="stylesheet" href="https://cdn.vidstack.io/player/theme.css">
     <link rel="stylesheet" href="https://cdn.vidstack.io/player/video.css">
     <script type="module" src="https://cdn.vidstack.io/player"></script>
     <script type="module" src="https://cdn.vidstack.io/icons"></script>
     
-    <!-- Preconnect Optimization -->
     <link rel="preconnect" href="https://www.google.com" crossorigin="true">
     <link rel="preconnect" href="https://i.ytimg.com" crossorigin="true">
     <link rel="preconnect" href="https://www.youtube.com" crossorigin="true">
@@ -25,7 +23,7 @@
             height: 100%;
             overflow: hidden;
             background: #000;
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif;
+            font-family: "YouTube Sans", "Roboto", -apple-system, BlinkMacSystemFont, Arial, sans-serif;
             color: #f1f1f1;
             -webkit-font-smoothing: antialiased;
         }
@@ -38,11 +36,6 @@
             background: #000;
         }
 
-        /* 
-           CARGA CIEGA:
-           El reproductor nace 100% invisible para que YouTube 
-           nunca pueda mostrar su error en pantalla.
-        */
         #rmExternalPlayer {
             width: 100%;
             height: 100%;
@@ -51,71 +44,23 @@
             inset: 0;
             display: block;
             overflow: hidden;
-            opacity: 0;
-            visibility: hidden;
-            transition: opacity 0.25s ease;
             --media-width: 100%;
             --media-height: 100%;
             --video-width: 100%;
             --video-height: 100%;
         }
 
-        /* Solo se hace visible cuando el video reproduce de verdad */
-        #rmExternalPlayer.is-ready {
-            opacity: 1 !important;
-            visibility: visible !important;
-        }
-
-        /* Supresión de textos y layouts de error internos de Vidstack */
-        media-player[data-error] {
+        /* 
+           Elimina cualquier texto, capa u overlay de error que Vidstack 
+           quiera poner por encima, dejando el error nativo de YouTube limpio.
+        */
+        .vds-error,
+        [data-media-error],
+        media-player[data-error] .vds-poster,
+        media-player::part(error) {
+            display: none !important;
             opacity: 0 !important;
             visibility: hidden !important;
-        }
-        .vds-error, [data-media-error] {
-            display: none !important;
-        }
-
-        /* PANTALLA ÚNICA DE ERROR */
-        #unifiedErrorScreen {
-            position: absolute;
-            inset: 0;
-            background: #0a0a0a;
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            justify-content: center;
-            z-index: 999;
-            opacity: 0;
-            visibility: hidden;
-            transition: opacity 0.2s ease;
-            text-align: center;
-            padding: 20px;
-        }
-
-        #unifiedErrorScreen.visible {
-            opacity: 1;
-            visibility: visible;
-        }
-
-        .error-circle {
-            width: 54px;
-            height: 54px;
-            border-radius: 50%;
-            border: 2px solid #555;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            margin-bottom: 14px;
-            color: #aaa;
-            font-size: 24px;
-            font-weight: 600;
-        }
-
-        .error-text {
-            font-size: 15px;
-            font-weight: 500;
-            color: #d1d1d1;
-            letter-spacing: 0.2px;
         }
     </style>
 </head>
@@ -124,12 +69,6 @@
         <media-player id="rmExternalPlayer" class="vds-player" load="eager" view-type="video" stream-type="on-demand" log-level="silent" crossorigin="" playsinline="" data-media-player="" tabindex="0" role="region" aria-label="Video Player" data-orientation="landscape">
             <media-provider></media-provider>
         </media-player>
-
-        <!-- Única pantalla de error -->
-        <div id="unifiedErrorScreen">
-            <div class="error-circle">!</div>
-            <div class="error-text" id="unifiedErrorText">Este video no está disponible</div>
-        </div>
     </div>
 
     <script>
@@ -139,45 +78,6 @@
         const startTime = parseFloat(params.get('t')) || 0;
 
         const player = document.getElementById('rmExternalPlayer');
-        const errorScreen = document.getElementById('unifiedErrorScreen');
-        const errorText = document.getElementById('unifiedErrorText');
-
-        let currentVid = videoId || null;
-        let shouldAutoplay = autoplay === '1';
-        let endedReported = false;
-        let reportedReady = false;
-        let trackToken = 0;
-        let lastReportedTime = 0;
-        let pendingStartTime = startTime;
-        let watchdogTimer = null;
-        let isErrorState = false;
-
-        function postToParent(m) {
-            try { window.parent.postMessage(Object.assign({ source: 'x-player' }, m), '*'); } catch (e) {}
-        }
-
-        function triggerUnifiedError(msg) {
-            if (isErrorState) return;
-            isErrorState = true;
-
-            if (watchdogTimer) clearTimeout(watchdogTimer);
-
-            // Mantener el reproductor de YouTube totalmente oculto
-            if (player) {
-                player.classList.remove('is-ready');
-            }
-
-            // Mostrar nuestro error
-            if (errorText && msg) errorText.textContent = msg;
-            if (errorScreen) errorScreen.classList.add('visible');
-
-            postToParent({ type: 'error', videoId: currentVid, message: msg || 'unavailable' });
-        }
-
-        function clearErrorState() {
-            isErrorState = false;
-            if (errorScreen) errorScreen.classList.remove('visible');
-        }
 
         function fitProviderFrame(attempt) {
             if (!player) return;
@@ -192,20 +92,25 @@
             frame.style.setProperty('min-height', '0', 'important');
             frame.style.setProperty('position', 'absolute', 'important');
             frame.style.setProperty('inset', '0', 'important');
+            frame.style.setProperty('opacity', '1', 'important');
+            frame.style.setProperty('visibility', 'visible', 'important');
         }
 
         fitProviderFrame(0);
 
+        let currentVid = videoId || null;
+        let shouldAutoplay = autoplay === '1';
+        let endedReported = false;
+        let reportedReady = false;
+        let trackToken = 0;
+        let lastReportedTime = 0;
+        let pendingStartTime = startTime;
+
+        function postToParent(m) {
+            try { window.parent.postMessage(Object.assign({ source: 'x-player' }, m), '*'); } catch (e) {}
+        }
+
         function onPlaybackSuccess() {
-            if (isErrorState) return;
-            if (watchdogTimer) clearTimeout(watchdogTimer);
-            clearErrorState();
-
-            // Revelar el reproductor SOLO cuando el video está listo y reproduciendo
-            if (player) {
-                player.classList.add('is-ready');
-            }
-
             if (!reportedReady) {
                 reportedReady = true;
                 postToParent({ type: 'ready', videoId: currentVid });
@@ -233,14 +138,6 @@
         }
 
         function initTrack(vid, auto, startAt) {
-            clearErrorState();
-            if (watchdogTimer) clearTimeout(watchdogTimer);
-
-            // Ocultar inmediatamente el player al cambiar de track
-            if (player) {
-                player.classList.remove('is-ready');
-            }
-
             currentVid = vid;
             shouldAutoplay = !!auto;
             pendingStartTime = Math.max(0, Number(startAt) || 0);
@@ -269,22 +166,12 @@
                 if (pendingStartTime > 0) {
                     try { player.currentTime = pendingStartTime; } catch (e) {}
                 }
-                if (shouldAutoplay) {
-                    safePlay();
-                } else {
-                    // Si no es autoplay pero cargó datos válidos, podemos revelarlo
-                    onPlaybackSuccess();
-                }
+                if (shouldAutoplay) safePlay();
             };
 
+            player.addEventListener('loadedmetadata', attemptStart, { once: true });
             player.addEventListener('can-play', attemptStart, { once: true });
-
-            // Watchdog rápido (4s): Si en 4s no arranca, está bloqueado
-            watchdogTimer = setTimeout(function () {
-                if (activeToken === trackToken && !reportedReady) {
-                    triggerUnifiedError('Este video no está disponible');
-                }
-            }, 4000);
+            setTimeout(attemptStart, 800);
         }
 
         if (player) {
@@ -292,23 +179,35 @@
                 initTrack(videoId, autoplay === '1', startTime);
             }
 
-            // Capturar errores de Vidstack
-            player.addEventListener('error', function () {
-                triggerUnifiedError('Este video no está disponible');
+            // Notifica al padre si YouTube o el player reportan error, pero sin tocar la pantalla
+            player.addEventListener('error', function (err) {
+                postToParent({ type: 'error', videoId: currentVid });
             });
 
-            // MutationObserver para atributos data-error
-            const observer = new MutationObserver(function (mutations) {
-                for (let i = 0; i < mutations.length; i++) {
-                    if (mutations[i].attributeName === 'data-error' && player.hasAttribute('data-error')) {
-                        triggerUnifiedError('Este video no está disponible');
-                        break;
+            player.addEventListener('time-update', function () {
+                if (player.currentTime > 0.05) {
+                    onPlaybackSuccess();
+
+                    const nowSec = player.currentTime;
+                    if (Math.abs(nowSec - lastReportedTime) >= 2) {
+                        lastReportedTime = nowSec;
+                        postToParent({
+                            type: 'time',
+                            videoId: currentVid,
+                            time: nowSec,
+                            duration: player.duration || 0,
+                            paused: player.paused
+                        });
                     }
                 }
             });
-            observer.observe(player, { attributes: true });
 
-            // Interceptación de eventos de YouTube
+            player.addEventListener('playing', function () {
+                onPlaybackSuccess();
+            });
+
+            player.addEventListener('ended', notifyEnded);
+
             window.addEventListener('message', function (ev) {
                 let data = ev.data;
 
@@ -316,19 +215,17 @@
                     try { data = JSON.parse(data); } catch (e) {}
                 }
 
-                if (data && typeof data === 'object') {
-                    // Si YouTube emite su código de error interno
-                    if (data.event === 'onError' || data.info === 150 || data.info === 101 || data.info === 100 || data.info === 2 || data.info === 5) {
-                        triggerUnifiedError('Este video no está disponible');
-                        return;
-                    }
-                    if (data.event === 'infoDelivery' && data.info && (data.info.errorCode || data.info.error)) {
-                        triggerUnifiedError('Este video no está disponible');
-                        return;
-                    }
+                if (!data || typeof data !== 'object') return;
 
-                    // Comandos desde la app padre (voice-eva)
-                    if (data.source === 'voice-eva') {
+                // Si YouTube envía error interno por postMessage, avisar al padre
+                if (data.event === 'onError' || (data.info && data.info.errorCode)) {
+                    postToParent({ type: 'error', videoId: currentVid, code: data.info });
+                    return;
+                }
+
+                // Control desde la app padre
+                if (data.source === 'voice-eva') {
+                    try {
                         switch (data.type) {
                             case 'load':
                                 if (data.videoId) {
@@ -364,30 +261,9 @@
                                 player.volume = Math.max(0, Math.min(1, (Number(data.volume) || 0) / 100));
                                 break;
                         }
-                    }
+                    } catch (e) {}
                 }
             });
-
-            // Confirmación real de reproducción
-            player.addEventListener('time-update', function () {
-                if (player.currentTime > 0.05) {
-                    onPlaybackSuccess();
-                    const nowSec = player.currentTime;
-                    if (Math.abs(nowSec - lastReportedTime) >= 2) {
-                        lastReportedTime = nowSec;
-                        postToParent({
-                            type: 'time',
-                            videoId: currentVid,
-                            time: nowSec,
-                            duration: player.duration || 0,
-                            paused: player.paused
-                        });
-                    }
-                }
-            });
-
-            player.addEventListener('playing', onPlaybackSuccess);
-            player.addEventListener('ended', notifyEnded);
         }
     </script>
 </body>
