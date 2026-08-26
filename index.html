@@ -210,6 +210,7 @@
         let endedReported = false;
         let reportedReady = false;
         let trackToken = 0;
+        let loadFailureTimer = null;
         let lastReportedTime = 0;
         let pendingStartTime = startTime;
 
@@ -236,6 +237,13 @@
             errorOverlay.classList.remove('active');
         }
 
+        function clearLoadFailureTimer() {
+            if (loadFailureTimer) {
+                clearTimeout(loadFailureTimer);
+                loadFailureTimer = null;
+            }
+        }
+
         function startCountdown() {
             if (countdownTimer) clearInterval(countdownTimer);
             countdownSec = 3;
@@ -254,6 +262,7 @@
 
         function triggerFatalError(code) {
             if (isFatalError) return;
+            clearLoadFailureTimer();
             isFatalError = true;
 
             player.classList.remove('vds-visible');
@@ -280,6 +289,7 @@
 
         function onPlaybackSuccess() {
             if (isFatalError) return;
+            clearLoadFailureTimer();
             hideErrorOverlay();
             hideCurtain();
 
@@ -342,6 +352,18 @@
             player.addEventListener('loadedmetadata', attemptStart, { once: true });
             player.addEventListener('can-play', attemptStart, { once: true });
             setTimeout(attemptStart, 800);
+
+            clearLoadFailureTimer();
+            if (shouldAutoplay) {
+                loadFailureTimer = setTimeout(function () {
+                    const duration = Number(player.duration) || 0;
+                    const readyState = Number(player.readyState) || 0;
+                    const position = Number(player.currentTime) || 0;
+                    if (activeToken === trackToken && !isFatalError && duration <= 0 && readyState < 1 && position <= 0.05) {
+                        triggerFatalError(100);
+                    }
+                }, 7000);
+            }
         }
 
         // Vigilante continuo de fin de pista (evita quedarse trabado en 4:11 / 4:11)
