@@ -10,42 +10,76 @@
     <link rel="stylesheet" href="https://cdn.vidstack.io/player/video.css">
     <script type="module" src="https://cdn.vidstack.io/player"></script>
     <script type="module" src="https://cdn.vidstack.io/icons"></script>
+    
+    <link rel="preconnect" href="https://www.google.com" crossorigin="true">
+    <link rel="preconnect" href="https://i.ytimg.com" crossorigin="true">
+    <link rel="preconnect" href="https://www.youtube.com" crossorigin="true">
 
     <style>
-        * { box-sizing: border-box; user-select: none; margin: 0; padding: 0; }
+        * { 
+            box-sizing: border-box; 
+            user-select: none; 
+            margin: 0; 
+            padding: 0; 
+        }
 
-        html, body, #playerHost {
+        html, body {
             width: 100%;
             height: 100%;
             overflow: hidden;
             background: #000;
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
             color: #f1f1f1;
+            -webkit-font-smoothing: antialiased;
         }
 
+        #playerHost {
+            width: 100%;
+            height: 100%;
+            position: relative;
+            overflow: hidden;
+            background: #000;
+        }
+
+        /* Reproductor completamente limpio a pantalla completa */
         #rmExternalPlayer {
             width: 100%;
             height: 100%;
+            max-width: none;
             position: absolute;
             inset: 0;
             display: block;
+            overflow: hidden;
             --media-width: 100%;
             --media-height: 100%;
             --video-width: 100%;
             --video-height: 100%;
         }
 
-        /* Bloquea overlays o textos residuales que Vidstack intente superponer */
+        /* 
+           Oculta absolutamente cualquier control, botón, 
+           overlay o menú que Vidstack o el navegador intenten pintar 
+        */
+        media-player::part(controls),
+        media-controls,
+        .vds-controls,
+        .vds-button,
+        .vds-time,
+        .vds-slider,
         .vds-error,
         [data-media-error],
         media-player[data-error] .vds-poster {
             display: none !important;
+            opacity: 0 !important;
+            pointer-events: none !important;
+            visibility: hidden !important;
         }
     </style>
 </head>
 <body>
     <div id="playerHost">
-        <media-player id="rmExternalPlayer" class="vds-player" load="eager" view-type="video" stream-type="on-demand" log-level="silent" crossorigin playsinline>
+        <!-- Sin atributos de controls, modo headless puro -->
+        <media-player id="rmExternalPlayer" class="vds-player" load="eager" view-type="video" stream-type="on-demand" log-level="silent" crossorigin="" playsinline="" data-media-player="" tabindex="-1" role="region" aria-label="Video Player" data-orientation="landscape">
             <media-provider></media-provider>
         </media-player>
     </div>
@@ -53,11 +87,12 @@
     <script>
         const params = new URLSearchParams(window.location.search);
         const videoId = params.get('v');
-        const autoplay = params.get('autoplay') === '1';
+        const autoplay = params.get('autoplay');
         const startTime = parseFloat(params.get('t')) || 0;
 
         const player = document.getElementById('rmExternalPlayer');
 
+        // Ajusta el iframe de YouTube al 100% de la ventana sin bordes
         function fitProviderFrame(attempt) {
             if (!player) return;
             const frame = player.provider && player.provider.iframe;
@@ -76,12 +111,12 @@
         fitProviderFrame(0);
 
         let currentVid = videoId || null;
-        let shouldAutoplay = autoplay;
+        let shouldAutoplay = autoplay === '1';
         let endedReported = false;
         let reportedReady = false;
+        let trackToken = 0;
         let lastReportedTime = 0;
         let pendingStartTime = startTime;
-        let trackToken = 0;
 
         function postToParent(m) {
             try { window.parent.postMessage(Object.assign({ source: 'x-player' }, m), '*'); } catch (e) {}
@@ -92,6 +127,13 @@
                 reportedReady = true;
                 postToParent({ type: 'ready', videoId: currentVid });
             }
+        }
+
+        function notifyEnded() {
+            if (endedReported) return;
+            endedReported = true;
+            shouldAutoplay = false;
+            postToParent({ type: 'ended', videoId: currentVid });
         }
 
         function safePlay() {
@@ -122,13 +164,7 @@
                 player.removeAttribute('src');
             } catch (e) {}
 
-            // Si es URL directa (mp4/m3u8) o ID de YouTube
-            if (vid.startsWith('http') || vid.includes('.mp4') || vid.includes('.m3u8')) {
-                player.src = vid;
-            } else {
-                player.src = 'youtube/' + vid;
-            }
-
+            player.src = 'youtube/' + vid;
             fitProviderFrame(0);
 
             if (shouldAutoplay) {
@@ -152,12 +188,13 @@
 
         if (player) {
             if (videoId) {
-                initTrack(videoId, autoplay, startTime);
+                initTrack(videoId, autoplay === '1', startTime);
             }
 
             player.addEventListener('time-update', function () {
                 if (player.currentTime > 0.05) {
                     onPlaybackSuccess();
+
                     const nowSec = player.currentTime;
                     if (Math.abs(nowSec - lastReportedTime) >= 2) {
                         lastReportedTime = nowSec;
@@ -173,22 +210,19 @@
             });
 
             player.addEventListener('playing', onPlaybackSuccess);
-
-            player.addEventListener('ended', function () {
-                if (endedReported) return;
-                endedReported = true;
-                postToParent({ type: 'ended', videoId: currentVid });
-            });
+            player.addEventListener('ended', notifyEnded);
 
             player.addEventListener('error', function () {
                 postToParent({ type: 'error', videoId: currentVid });
             });
 
+            // Puente de control remoto vía postMessage desde voice-eva
             window.addEventListener('message', function (ev) {
                 let data = ev.data;
                 if (typeof data === 'string') {
                     try { data = JSON.parse(data); } catch (e) {}
                 }
+
                 if (!data || typeof data !== 'object') return;
 
                 if (data.event === 'onError' || (data.info && data.info.errorCode)) {
@@ -197,36 +231,43 @@
                 }
 
                 if (data.source === 'voice-eva') {
-                    switch (data.type) {
-                        case 'load':
-                            if (data.videoId) initTrack(data.videoId, !!data.autoplay, data.time);
-                            break;
-                        case 'play':
-                            shouldAutoplay = true;
-                            safePlay();
-                            break;
-                        case 'pause':
-                            shouldAutoplay = false;
-                            try { player.pause(); } catch (e) {}
-                            break;
-                        case 'seek':
-                            player.currentTime = Math.max(0, Number(data.time) || 0);
-                            break;
-                        case 'stop':
-                            shouldAutoplay = false;
-                            try { player.pause(); } catch (e) {}
-                            player.currentTime = 0;
-                            break;
-                        case 'mute':
-                            player.muted = true;
-                            break;
-                        case 'unmute':
-                            player.muted = false;
-                            break;
-                        case 'setVolume':
-                            player.volume = Math.max(0, Math.min(1, (Number(data.volume) || 0) / 100));
-                            break;
-                    }
+                    try {
+                        switch (data.type) {
+                            case 'load':
+                                if (data.videoId) {
+                                    initTrack(data.videoId, !!data.autoplay, data.time);
+                                }
+                                break;
+                            case 'play':
+                                shouldAutoplay = true;
+                                safePlay();
+                                break;
+                            case 'pause':
+                                shouldAutoplay = false;
+                                try { player.pause(); } catch (e) {}
+                                break;
+                            case 'seek':
+                                const targetTime = Math.max(0, Number(data.time) || 0);
+                                if (Math.abs(player.currentTime - targetTime) > 4.0) {
+                                    player.currentTime = targetTime;
+                                }
+                                break;
+                            case 'stop':
+                                shouldAutoplay = false;
+                                try { player.pause(); } catch (e) {}
+                                player.currentTime = 0;
+                                break;
+                            case 'mute':
+                                player.muted = true;
+                                break;
+                            case 'unmute':
+                                player.muted = false;
+                                break;
+                            case 'setVolume':
+                                player.volume = Math.max(0, Math.min(1, (Number(data.volume) || 0) / 100));
+                                break;
+                        }
+                    } catch (e) {}
                 }
             });
         }
