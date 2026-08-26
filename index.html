@@ -290,6 +290,7 @@
         let reportedReady = false;
         let isDraggingProgress = false;
         let hideControlsTimer = null;
+        let loadWatchdogTimer = null;
         let lastReportedTime = 0;
         let pendingStartTime = startTime;
 
@@ -322,6 +323,13 @@
             }
             isFatalError = false;
             errorOverlay.classList.remove('active');
+        }
+
+        function clearLoadWatchdog() {
+            if (loadWatchdogTimer) {
+                clearTimeout(loadWatchdogTimer);
+                loadWatchdogTimer = null;
+            }
         }
 
         function startCountdown() {
@@ -368,6 +376,7 @@
 
         function onPlaybackSuccess() {
             if (isFatalError) return;
+            clearLoadWatchdog();
             hideErrorOverlay();
             hideCurtain();
 
@@ -448,6 +457,7 @@
             if (!player) return;
             const d = player.duration;
             if (d && isFinite(d) && d > 0 && !isFatalError) {
+                clearLoadWatchdog();
                 updateProgressUI();
                 postToParent({ type: 'duration', videoId: currentVid, duration: d });
             }
@@ -484,6 +494,13 @@
             player.addEventListener('loadedmetadata', attemptStart, { once: true });
             player.addEventListener('can-play', attemptStart, { once: true });
             setTimeout(attemptStart, 800);
+
+            clearLoadWatchdog();
+            loadWatchdogTimer = setTimeout(function () {
+                if (!isFatalError && currentVid === vid && (!player.duration || player.duration <= 0) && player.currentTime <= 0.05) {
+                    triggerFatalError(100);
+                }
+            }, 5000);
         }
 
         // Vigilante continuo de fin de pista (evita quedarse trabado en 4:11 / 4:11)
