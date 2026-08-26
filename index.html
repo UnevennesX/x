@@ -58,7 +58,7 @@
             opacity: 1;
         }
 
-        /* Cortina de carga inicial */
+        /* Cortina de carga */
         .rm-curtain {
             position: absolute;
             inset: 0;
@@ -226,10 +226,8 @@
         let lastExpectedAutoplay = autoplay === '1';
         let isFatalError = false;
         let playbackConfirmed = false;
-        let endedThisVideo = false;
         let endedReported = false;
         let reportedReady = false;
-        let hangWatchdogTimer = null;
         let lastReportedTime = 0;
 
         function getReadableErrorReason(code) {
@@ -265,29 +263,6 @@
             errorOverlay.classList.remove('active');
         }
 
-        function clearHangWatchdog() {
-            if (hangWatchdogTimer) {
-                clearTimeout(hangWatchdogTimer);
-                hangWatchdogTimer = null;
-            }
-        }
-
-        function startHangWatchdog() {
-            clearHangWatchdog();
-            // Solo vigilar si realmente se esperaba autoplay; en modo manual el
-            // usuario decide cuándo reproducir y no debe saltar solo.
-            if (!lastExpectedAutoplay) return;
-            hangWatchdogTimer = setTimeout(function () {
-                if (!playbackConfirmed && !isFatalError) {
-                    // Fallo real solo si el video nunca arrancó (currentTime ~ 0).
-                    // Si ya corre pero está pausado, no lo damos por fallido.
-                    if (!player || player.currentTime < 0.1) {
-                        triggerFatalError(150);
-                    }
-                }
-            }, 6000);
-        }
-
         function startCountdown() {
             if (countdownTimer) clearInterval(countdownTimer);
             countdownSec = 3;
@@ -305,13 +280,12 @@
         }
 
         function triggerFatalError(code) {
-            if (playbackConfirmed && player && player.currentTime > 0.6 && !player.paused) {
+            if (playbackConfirmed && player && player.currentTime > 1.0 && !player.paused) {
                 return;
             }
 
             if (isFatalError) return;
             isFatalError = true;
-            clearHangWatchdog();
 
             player.classList.remove('vds-visible');
             curtain.classList.add('hidden');
@@ -327,13 +301,11 @@
 
         function skipVideo() {
             hideErrorOverlay();
-            clearHangWatchdog();
             postToParent({ type: 'skip_fatal', videoId: currentVid });
         }
 
         function onPlaybackSuccess() {
             if (isFatalError) return;
-            clearHangWatchdog();
             hideErrorOverlay();
             hideCurtain();
 
@@ -345,13 +317,18 @@
 
         function notifyEnded() {
             if (endedReported) return;
-            endedThisVideo = true;
+            // Solo marcar ended si realmente se tiene duración y estamos cerca del final (>95% o dentro de los últimos 2 segs)
+            if (player && player.duration && player.duration > 5) {
+                if (player.currentTime < player.duration - 2.5) {
+                    return; // Falso positivo de fin
+                }
+            }
             endedReported = true;
             lastExpectedAutoplay = false;
             postToParent({ type: 'ended', videoId: currentVid });
         }
 
-        // Intercepción directa de mensajes de YouTube IFrame
+        // Intercepción de mensajes del IFrame interno de YouTube
         window.addEventListener('message', function (ev) {
             try {
                 let data = ev.data;
@@ -360,14 +337,12 @@
 
                 if (data.event === 'onStateChange') {
                     if (data.info === 1 || data.data === 1) { // PLAYING
-                        if (player && player.currentTime > 0.05) {
-                            onPlaybackSuccess();
-                        }
+                        onPlaybackSuccess();
                     } else if (data.info === 0 || data.data === 0) { // ENDED
                         notifyEnded();
                     }
                 } else if (data.event === 'infoDelivery' && data.info) {
-                    if (data.info.playerState === 1 && data.info.currentTime > 0.05) {
+                    if (data.info.playerState === 1) {
                         onPlaybackSuccess();
                     } else if (data.info.playerState === 0) {
                         notifyEnded();
@@ -387,6 +362,16 @@
             } catch (e) {}
         }
 
+        function reportDuration() {
+            if (!player) return false;
+            const d = player.duration;
+            if (d && isFinite(d) && d > 0 && !isFatalError) {
+                postToParent({ type: 'duration', videoId: currentVid, duration: d });
+                return true;
+            }
+            return false;
+        }
+
         if (player) {
             if (autoplay !== '1') player.removeAttribute('autoplay');
 
@@ -396,11 +381,10 @@
 
                 if (autoplay === '1') {
                     player.setAttribute('autoplay', '');
-                    // YouTube solo permite autoplay si está silenciado (iframe de origen cruzado)
                     try { player.muted = true; } catch (e) {}
                     lastExpectedAutoplay = true;
                 }
-                startHangWatchdog();
+
                 if (startTime > 0) {
                     const onReadySeek = function () {
                         player.removeEventListener('can-play', onReadySeek);
@@ -410,12 +394,11 @@
                 }
             }
 
-            // Reportar progreso y confirmar reproducción real
             player.addEventListener('time-update', function () {
-                if (player.currentTime > 0.08 && !isFatalError) {
+                if (player.currentTime > 0.05 && !isFatalError) {
                     onPlaybackSuccess();
                     const nowSec = player.currentTime;
-                    if (Math.abs(nowSec - lastReportedTime) >= 2) {
+                    if (Math.abs(nowSec - lastReportedTime) >= 1.5) {
                         lastReportedTime = nowSec;
                         postToParent({
                             type: 'time',
@@ -429,7 +412,7 @@
             });
 
             player.addEventListener('playing', function () {
-                if (player.currentTime > 0.05 && !isFatalError) {
+                if (!isFatalError) {
                     onPlaybackSuccess();
                 }
             });
@@ -449,57 +432,15 @@
                 player.addEventListener(evtName, notifyEnded);
             });
 
-            function reportDuration() {
-                const d = player.duration;
-                if (d && isFinite(d) && d > 0 && !isFatalError) {
-                    postToParent({ type: 'duration', videoId: currentVid, duration: d });
-                    return true;
-                }
-                return false;
-            }
-
-            let durRetry = 0;
-            let reportInterval = null;
-            function scheduleReportDuration() {
-                durRetry = 0;
-                if (reportInterval) clearInterval(reportInterval);
-                reportInterval = setInterval(function () {
-                    if (reportDuration()) {
-                        clearInterval(reportInterval);
-                        reportInterval = null;
-                    } else {
-                        durRetry++;
-                        if (durRetry > 30) {
-                            clearInterval(reportInterval);
-                            reportInterval = null;
-                        }
-                    }
-                }, 1000);
-            }
-
             player.addEventListener('durationchange', reportDuration);
             player.addEventListener('duration-change', reportDuration);
-            player.addEventListener('loadedmetadata', reportDuration);
-            player.addEventListener('can-play', scheduleReportDuration);
-
-            // Verificador continuo de finalización
-            setInterval(function () {
-                if (endedThisVideo || isFatalError) {
-                    lastExpectedAutoplay = false;
-                    return;
+            player.addEventListener('loadedmetadata', function () {
+                reportDuration();
+                if (startTime > 0) {
+                    try { player.currentTime = startTime; } catch (e) {}
                 }
-
-                try {
-                    if (player.duration && player.duration > 0 && player.currentTime >= player.duration - 0.4) {
-                        notifyEnded();
-                        return;
-                    }
-                } catch (e) {}
-
-                if (lastExpectedAutoplay && player.paused && !isFatalError && playbackConfirmed) {
-                    safePlay();
-                }
-            }, 1000);
+            });
+            player.addEventListener('can-play', reportDuration);
 
             // Mensajes recibidos desde room-music.js
             window.addEventListener('message', function (ev) {
@@ -511,9 +452,7 @@
                             if (data.videoId) {
                                 hideErrorOverlay();
                                 showCurtain();
-                                clearHangWatchdog();
                                 currentVid = data.videoId;
-                                endedThisVideo = false;
                                 endedReported = false;
                                 reportedReady = false;
                                 playbackConfirmed = false;
@@ -522,14 +461,12 @@
 
                                 if (data.autoplay) {
                                     player.setAttribute('autoplay', '');
-                                    // YouTube solo permite autoplay si está silenciado (iframe de origen cruzado)
                                     try { player.muted = true; } catch (e) {}
                                     lastExpectedAutoplay = true;
                                 } else {
                                     player.removeAttribute('autoplay');
                                     lastExpectedAutoplay = false;
                                 }
-                                startHangWatchdog();
 
                                 const loadStart = Math.max(0, Number(data.time) || 0);
                                 const onCanPlay = function () {
@@ -542,7 +479,6 @@
                                     }
                                 };
                                 player.addEventListener('can-play', onCanPlay);
-                                scheduleReportDuration();
                             }
                             break;
 
@@ -560,13 +496,15 @@
                             break;
                         case 'seek':
                             if (!isFatalError) {
-                                player.currentTime = Math.max(0, Number(data.time) || 0);
+                                const targetTime = Math.max(0, Number(data.time) || 0);
+                                if (Math.abs(player.currentTime - targetTime) > 1.5) {
+                                    player.currentTime = targetTime;
+                                }
                             }
                             break;
                         case 'stop':
                             hideErrorOverlay();
                             showCurtain();
-                            clearHangWatchdog();
                             lastExpectedAutoplay = false;
                             try { player.pause(); } catch (e) {}
                             player.currentTime = 0;
