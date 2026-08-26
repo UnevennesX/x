@@ -209,6 +209,7 @@
         let isFatalError = false;
         let endedReported = false;
         let reportedReady = false;
+        let trackToken = 0;
         let lastReportedTime = 0;
         let pendingStartTime = startTime;
 
@@ -290,6 +291,7 @@
 
         function notifyEnded() {
             if (endedReported || isFatalError) return;
+            if (!reportedReady && (!player || player.currentTime <= 0.05)) return;
             endedReported = true;
             shouldAutoplay = false;
             postToParent({ type: 'ended', videoId: currentVid });
@@ -316,6 +318,8 @@
             reportedReady = false;
             lastReportedTime = 0;
             isFatalError = false;
+            trackToken += 1;
+            const activeToken = trackToken;
 
             hideErrorOverlay();
             showCurtain();
@@ -327,6 +331,7 @@
             }
 
             const attemptStart = function () {
+                if (activeToken !== trackToken) return;
                 if (pendingStartTime > 0) {
                     try { player.currentTime = pendingStartTime; } catch (e) {}
                 }
@@ -348,7 +353,7 @@
             }
         }, 400);
 
-        // Intercepción de mensajes del IFrame de YouTube
+        // El estado inicial pausado de YouTube no significa que la pista terminó.
         window.addEventListener('message', function (ev) {
             try {
                 let data = ev.data;
@@ -405,9 +410,8 @@
                 triggerFatalError(ytCode);
             });
 
-            ['ended', 'vds-ended'].forEach(function(evtName) {
-                player.addEventListener(evtName, notifyEnded);
-            });
+            player.addEventListener('ended', notifyEnded);
+            player.addEventListener('vds-ended', notifyEnded);
 
             window.addEventListener('message', function (ev) {
                 const data = ev.data;
