@@ -44,6 +44,10 @@
             inset: 0;
             display: block;
             overflow: hidden;
+            --media-width: 100%;
+            --media-height: 100%;
+            --video-width: 100%;
+            --video-height: 100%;
         }
 
     </style>
@@ -64,22 +68,22 @@
 
         const player = document.getElementById('rmExternalPlayer');
 
-        function fitYouTubeFrame() {
-            if (!player || !player.shadowRoot) return;
-            const frame = player.shadowRoot.querySelector('iframe.vds-youtube');
-            if (!frame) return;
-            frame.style.width = '100%';
-            frame.style.height = '100%';
-            frame.style.minWidth = '0';
-            frame.style.minHeight = '0';
-            frame.style.position = 'absolute';
-            frame.style.inset = '0';
+        function fitProviderFrame(attempt) {
+            if (!player) return;
+            const frame = player.provider && player.provider.iframe;
+            if (!frame) {
+                if ((attempt || 0) < 60) requestAnimationFrame(function () { fitProviderFrame((attempt || 0) + 1); });
+                return;
+            }
+            frame.style.setProperty('width', '100%', 'important');
+            frame.style.setProperty('height', '100%', 'important');
+            frame.style.setProperty('min-width', '0', 'important');
+            frame.style.setProperty('min-height', '0', 'important');
+            frame.style.setProperty('position', 'absolute', 'important');
+            frame.style.setProperty('inset', '0', 'important');
         }
 
-        if (player && player.shadowRoot) {
-            new MutationObserver(fitYouTubeFrame).observe(player.shadowRoot, { childList: true, subtree: true });
-            fitYouTubeFrame();
-        }
+        fitProviderFrame(0);
 
         let currentVid = videoId || null;
         let shouldAutoplay = autoplay === '1';
@@ -135,7 +139,7 @@
                 player.removeAttribute('src');
             } catch (e) {}
             player.src = 'youtube/' + vid;
-            fitYouTubeFrame();
+            fitProviderFrame(0);
             if (shouldAutoplay) {
                 player.setAttribute('autoplay', '');
             } else {
