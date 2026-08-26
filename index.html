@@ -5,15 +5,18 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <meta name="referrer" content="strict-origin-when-cross-origin">
     <title>Player</title>
+    
+    <!-- Vidstack Core -->
     <link rel="stylesheet" href="https://cdn.vidstack.io/player/theme.css">
     <link rel="stylesheet" href="https://cdn.vidstack.io/player/video.css">
     <script type="module" src="https://cdn.vidstack.io/player"></script>
     <script type="module" src="https://cdn.vidstack.io/icons"></script>
     
+    <!-- Preconnect Optimization -->
     <link rel="preconnect" href="https://www.google.com" crossorigin="true">
     <link rel="preconnect" href="https://i.ytimg.com" crossorigin="true">
-    <link rel="preconnect" href="https://googleads.g.doubleclick.net" crossorigin="true">
-    <link rel="preconnect" href="https://static.doubleclick.net" crossorigin="true">
+    <link rel="preconnect" href="https://www.youtube.com" crossorigin="true">
+    <link rel="preconnect" href="https://www.youtube-nocookie.com" crossorigin="true">
 
     <style>
         * { box-sizing: border-box; user-select: none; margin: 0; padding: 0; }
@@ -23,7 +26,7 @@
             height: 100%;
             overflow: hidden;
             background: #000;
-            font-family: "YouTube Sans", "Roboto", -apple-system, BlinkMacSystemFont, Arial, sans-serif;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif;
             color: #f1f1f1;
             -webkit-font-smoothing: antialiased;
         }
@@ -48,59 +51,79 @@
             --media-height: 100%;
             --video-width: 100%;
             --video-height: 100%;
+            transition: opacity 0.2s ease-in-out;
         }
 
-        /* Pantalla de Error Única y Centralizada */
-        #customErrorOverlay {
+        /* Oculta completamente el player e iframe si hay error */
+        #rmExternalPlayer.is-hidden {
+            opacity: 0 !important;
+            visibility: hidden !important;
+            pointer-events: none !important;
+        }
+
+        /* Supresión de layouts por defecto de Vidstack en caso de error */
+        media-player[data-error] {
+            opacity: 0 !important;
+        }
+        .vds-error, [data-media-error] {
+            display: none !important;
+        }
+
+        /* UNICA PANTALLA DE ERROR */
+        #unifiedErrorScreen {
             position: absolute;
             inset: 0;
-            background: #0f0f0f;
-            display: none;
+            background: #0a0a0a;
+            display: flex;
             flex-direction: column;
             align-items: center;
             justify-content: center;
-            z-index: 99;
+            z-index: 999;
+            opacity: 0;
+            visibility: hidden;
+            transition: opacity 0.25s ease;
             text-align: center;
-            padding: 20px;
-            color: #fff;
+            padding: 24px;
+            box-sizing: border-box;
         }
 
-        #customErrorOverlay.active {
-            display: flex;
+        #unifiedErrorScreen.visible {
+            opacity: 1;
+            visibility: visible;
         }
 
-        .error-icon {
-            width: 64px;
-            height: 64px;
+        .error-circle {
+            width: 56px;
+            height: 56px;
             border-radius: 50%;
-            border: 3px solid #717171;
+            border: 2px solid #555;
             display: flex;
             align-items: center;
             justify-content: center;
-            font-size: 32px;
-            font-weight: bold;
-            color: #aaa;
             margin-bottom: 16px;
+            color: #aaa;
+            font-size: 26px;
+            font-weight: 600;
         }
 
-        .error-title {
-            font-size: 16px;
+        .error-text {
+            font-size: 15px;
             font-weight: 500;
-            color: #f1f1f1;
-            letter-spacing: 0.2px;
+            color: #d1d1d1;
+            letter-spacing: 0.3px;
         }
     </style>
 </head>
 <body>
     <div id="playerHost">
-        <media-player id="rmExternalPlayer" class="vds-player" load="eager" view-type="video" stream-type="on-demand" log-level="warn" crossorigin="" playsinline="" data-media-player="" tabindex="0" role="region" aria-label="Video Player" data-orientation="landscape">
+        <media-player id="rmExternalPlayer" class="vds-player" load="eager" view-type="video" stream-type="on-demand" log-level="silent" crossorigin="" playsinline="" data-media-player="" tabindex="0" role="region" aria-label="Video Player" data-orientation="landscape">
             <media-provider></media-provider>
         </media-player>
 
-        <!-- Capa de error única -->
-        <div id="customErrorOverlay">
-            <div class="error-icon">!</div>
-            <div class="error-title" id="errorMessage">Este video no está disponible</div>
+        <!-- Única pantalla de error renderizada -->
+        <div id="unifiedErrorScreen">
+            <div class="error-circle">!</div>
+            <div class="error-text" id="unifiedErrorText">Este video no está disponible</div>
         </div>
     </div>
 
@@ -111,17 +134,57 @@
         const startTime = parseFloat(params.get('t')) || 0;
 
         const player = document.getElementById('rmExternalPlayer');
-        const errorOverlay = document.getElementById('customErrorOverlay');
-        const errorMessage = document.getElementById('errorMessage');
+        const errorScreen = document.getElementById('unifiedErrorScreen');
+        const errorText = document.getElementById('unifiedErrorText');
 
-        function showError(msg) {
-            if (errorMessage && msg) errorMessage.textContent = msg;
-            if (errorOverlay) errorOverlay.classList.add('active');
-            postToParent({ type: 'error', videoId: currentVid, message: msg });
+        let currentVid = videoId || null;
+        let shouldAutoplay = autoplay === '1';
+        let endedReported = false;
+        let reportedReady = false;
+        let trackToken = 0;
+        let lastReportedTime = 0;
+        let pendingStartTime = startTime;
+        let watchdogTimer = null;
+        let isErrorState = false;
+
+        function postToParent(m) {
+            try { window.parent.postMessage(Object.assign({ source: 'x-player' }, m), '*'); } catch (e) {}
         }
 
-        function hideError() {
-            if (errorOverlay) errorOverlay.classList.remove('active');
+        function triggerUnifiedError(msg) {
+            if (isErrorState) return;
+            isErrorState = true;
+
+            if (watchdogTimer) clearTimeout(watchdogTimer);
+
+            // 1. Ocultar inmediatamente el player e iframe de YouTube
+            if (player) {
+                player.classList.add('is-hidden');
+                const frame = player.provider && player.provider.iframe;
+                if (frame) {
+                    frame.style.setProperty('opacity', '0', 'important');
+                    frame.style.setProperty('visibility', 'hidden', 'important');
+                }
+            }
+
+            // 2. Mostrar la pantalla única
+            if (errorText && msg) errorText.textContent = msg;
+            if (errorScreen) errorScreen.classList.add('visible');
+
+            postToParent({ type: 'error', videoId: currentVid, message: msg || 'unavailable' });
+        }
+
+        function clearErrorState() {
+            isErrorState = false;
+            if (errorScreen) errorScreen.classList.remove('visible');
+            if (player) {
+                player.classList.remove('is-hidden');
+                const frame = player.provider && player.provider.iframe;
+                if (frame) {
+                    frame.style.removeProperty('opacity');
+                    frame.style.removeProperty('visibility');
+                }
+            }
         }
 
         function fitProviderFrame(attempt) {
@@ -141,20 +204,11 @@
 
         fitProviderFrame(0);
 
-        let currentVid = videoId || null;
-        let shouldAutoplay = autoplay === '1';
-        let endedReported = false;
-        let reportedReady = false;
-        let trackToken = 0;
-        let lastReportedTime = 0;
-        let pendingStartTime = startTime;
-
-        function postToParent(m) {
-            try { window.parent.postMessage(Object.assign({ source: 'x-player' }, m), '*'); } catch (e) {}
-        }
-
         function onPlaybackSuccess() {
-            hideError();
+            if (isErrorState) return;
+            if (watchdogTimer) clearTimeout(watchdogTimer);
+            clearErrorState();
+
             if (!reportedReady) {
                 reportedReady = true;
                 postToParent({ type: 'ready', videoId: currentVid });
@@ -182,7 +236,9 @@
         }
 
         function initTrack(vid, auto, startAt) {
-            hideError();
+            clearErrorState();
+            if (watchdogTimer) clearTimeout(watchdogTimer);
+
             currentVid = vid;
             shouldAutoplay = !!auto;
             pendingStartTime = Math.max(0, Number(startAt) || 0);
@@ -196,8 +252,10 @@
                 player.pause();
                 player.removeAttribute('src');
             } catch (e) {}
+
             player.src = 'youtube/' + vid;
             fitProviderFrame(0);
+
             if (shouldAutoplay) {
                 player.setAttribute('autoplay', '');
             } else {
@@ -212,9 +270,21 @@
                 if (shouldAutoplay) safePlay();
             };
 
-            player.addEventListener('loadedmetadata', attemptStart, { once: true });
+            player.addEventListener('loadedmetadata', function () {
+                if (activeToken === trackToken) {
+                    if (watchdogTimer) clearTimeout(watchdogTimer);
+                    attemptStart();
+                }
+            }, { once: true });
+
             player.addEventListener('can-play', attemptStart, { once: true });
-            setTimeout(attemptStart, 800);
+
+            // Watchdog: Si en 6.5s no cargó metadata ni arrancó, el video está bloqueado
+            watchdogTimer = setTimeout(function () {
+                if (activeToken === trackToken && !reportedReady && (!player.currentTime || player.currentTime === 0)) {
+                    triggerUnifiedError('Este video no está disponible');
+                }
+            }, 6500);
         }
 
         if (player) {
@@ -222,15 +292,86 @@
                 initTrack(videoId, autoplay === '1', startTime);
             }
 
-            // Captura de errores unificada
-            player.addEventListener('error', function (err) {
-                showError('Este video no está disponible');
+            // 1. Interceptar errores estándar de Vidstack
+            player.addEventListener('error', function () {
+                triggerUnifiedError('Este video no está disponible');
+            });
+
+            // 2. MutationObserver: Detectar si Vidstack marca internamente el error
+            const observer = new MutationObserver(function (mutations) {
+                for (let i = 0; i < mutations.length; i++) {
+                    if (mutations[i].attributeName === 'data-error' && player.hasAttribute('data-error')) {
+                        triggerUnifiedError('Este video no está disponible');
+                        break;
+                    }
+                }
+            });
+            observer.observe(player, { attributes: true });
+
+            // 3. Sniffer de mensajes de YouTube y postMessage general
+            window.addEventListener('message', function (ev) {
+                let data = ev.data;
+
+                // Si viene como string JSON desde YouTube, parsearlo
+                if (typeof data === 'string') {
+                    try { data = JSON.parse(data); } catch (e) {}
+                }
+
+                if (data && typeof data === 'object') {
+                    // Detección de errores nativos de YouTube (2, 5, 100, 101, 150, 153)
+                    if (data.event === 'onError' || data.info === 150 || data.info === 101 || data.info === 100 || data.info === 2 || data.info === 5) {
+                        triggerUnifiedError('Este video no está disponible');
+                        return;
+                    }
+                    if (data.event === 'infoDelivery' && data.info && (data.info.errorCode || data.info.error)) {
+                        triggerUnifiedError('Este video no está disponible');
+                        return;
+                    }
+
+                    // Mensajes desde la aplicación padre (voice-eva)
+                    if (data.source === 'voice-eva') {
+                        switch (data.type) {
+                            case 'load':
+                                if (data.videoId) {
+                                    initTrack(data.videoId, !!data.autoplay, data.time);
+                                }
+                                break;
+                            case 'play':
+                                shouldAutoplay = true;
+                                safePlay();
+                                break;
+                            case 'pause':
+                                shouldAutoplay = false;
+                                try { player.pause(); } catch (e) {}
+                                break;
+                            case 'seek':
+                                const targetTime = Math.max(0, Number(data.time) || 0);
+                                if (Math.abs(player.currentTime - targetTime) > 4.0) {
+                                    player.currentTime = targetTime;
+                                }
+                                break;
+                            case 'stop':
+                                shouldAutoplay = false;
+                                try { player.pause(); } catch (e) {}
+                                player.currentTime = 0;
+                                break;
+                            case 'mute':
+                                player.muted = true;
+                                break;
+                            case 'unmute':
+                                player.muted = false;
+                                break;
+                            case 'setVolume':
+                                player.volume = Math.max(0, Math.min(1, (Number(data.volume) || 0) / 100));
+                                break;
+                        }
+                    }
+                }
             });
 
             player.addEventListener('time-update', function () {
                 if (player.currentTime > 0.05) {
                     onPlaybackSuccess();
-
                     const nowSec = player.currentTime;
                     if (Math.abs(nowSec - lastReportedTime) >= 2) {
                         lastReportedTime = nowSec;
@@ -245,54 +386,8 @@
                 }
             });
 
-            player.addEventListener('playing', function () {
-                onPlaybackSuccess();
-            });
-
+            player.addEventListener('playing', onPlaybackSuccess);
             player.addEventListener('ended', notifyEnded);
-
-            window.addEventListener('message', function (ev) {
-                const data = ev.data;
-                if (!data || typeof data !== 'object' || data.source !== 'voice-eva') return;
-                try {
-                    switch (data.type) {
-                        case 'load':
-                            if (data.videoId) {
-                                initTrack(data.videoId, !!data.autoplay, data.time);
-                            }
-                            break;
-
-                        case 'play':
-                            shouldAutoplay = true;
-                            safePlay();
-                            break;
-                        case 'pause':
-                            shouldAutoplay = false;
-                            try { player.pause(); } catch (e) {}
-                            break;
-                        case 'seek':
-                            const targetTime = Math.max(0, Number(data.time) || 0);
-                            if (Math.abs(player.currentTime - targetTime) > 4.0) {
-                                player.currentTime = targetTime;
-                            }
-                            break;
-                        case 'stop':
-                            shouldAutoplay = false;
-                            try { player.pause(); } catch (e) {}
-                            player.currentTime = 0;
-                            break;
-                        case 'mute':
-                            player.muted = true;
-                            break;
-                        case 'unmute':
-                            player.muted = false;
-                            break;
-                        case 'setVolume':
-                            player.volume = Math.max(0, Math.min(1, (Number(data.volume) || 0) / 100));
-                            break;
-                    }
-                } catch (e) {}
-            });
         }
     </script>
 </body>
