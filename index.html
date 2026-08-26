@@ -291,7 +291,8 @@
 
         function notifyEnded() {
             if (endedReported || isFatalError) return;
-            if (!reportedReady && (!player || player.currentTime <= 0.05)) return;
+            const position = player ? Number(player.currentTime) || 0 : 0;
+            if (!reportedReady && position <= 0.05) return;
             endedReported = true;
             shouldAutoplay = false;
             postToParent({ type: 'ended', videoId: currentVid });
