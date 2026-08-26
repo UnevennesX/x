@@ -16,7 +16,6 @@
     <link rel="preconnect" href="https://www.google.com" crossorigin="true">
     <link rel="preconnect" href="https://i.ytimg.com" crossorigin="true">
     <link rel="preconnect" href="https://www.youtube.com" crossorigin="true">
-    <link rel="preconnect" href="https://www.youtube-nocookie.com" crossorigin="true">
 
     <style>
         * { box-sizing: border-box; user-select: none; margin: 0; padding: 0; }
@@ -39,6 +38,11 @@
             background: #000;
         }
 
+        /* 
+           CARGA CIEGA:
+           El reproductor nace 100% invisible para que YouTube 
+           nunca pueda mostrar su error en pantalla.
+        */
         #rmExternalPlayer {
             width: 100%;
             height: 100%;
@@ -47,29 +51,31 @@
             inset: 0;
             display: block;
             overflow: hidden;
+            opacity: 0;
+            visibility: hidden;
+            transition: opacity 0.25s ease;
             --media-width: 100%;
             --media-height: 100%;
             --video-width: 100%;
             --video-height: 100%;
-            transition: opacity 0.2s ease-in-out;
         }
 
-        /* Oculta completamente el player e iframe si hay error */
-        #rmExternalPlayer.is-hidden {
-            opacity: 0 !important;
-            visibility: hidden !important;
-            pointer-events: none !important;
+        /* Solo se hace visible cuando el video reproduce de verdad */
+        #rmExternalPlayer.is-ready {
+            opacity: 1 !important;
+            visibility: visible !important;
         }
 
-        /* Supresión de layouts por defecto de Vidstack en caso de error */
+        /* Supresión de textos y layouts de error internos de Vidstack */
         media-player[data-error] {
             opacity: 0 !important;
+            visibility: hidden !important;
         }
         .vds-error, [data-media-error] {
             display: none !important;
         }
 
-        /* UNICA PANTALLA DE ERROR */
+        /* PANTALLA ÚNICA DE ERROR */
         #unifiedErrorScreen {
             position: absolute;
             inset: 0;
@@ -81,10 +87,9 @@
             z-index: 999;
             opacity: 0;
             visibility: hidden;
-            transition: opacity 0.25s ease;
+            transition: opacity 0.2s ease;
             text-align: center;
-            padding: 24px;
-            box-sizing: border-box;
+            padding: 20px;
         }
 
         #unifiedErrorScreen.visible {
@@ -93,16 +98,16 @@
         }
 
         .error-circle {
-            width: 56px;
-            height: 56px;
+            width: 54px;
+            height: 54px;
             border-radius: 50%;
             border: 2px solid #555;
             display: flex;
             align-items: center;
             justify-content: center;
-            margin-bottom: 16px;
+            margin-bottom: 14px;
             color: #aaa;
-            font-size: 26px;
+            font-size: 24px;
             font-weight: 600;
         }
 
@@ -110,7 +115,7 @@
             font-size: 15px;
             font-weight: 500;
             color: #d1d1d1;
-            letter-spacing: 0.3px;
+            letter-spacing: 0.2px;
         }
     </style>
 </head>
@@ -120,7 +125,7 @@
             <media-provider></media-provider>
         </media-player>
 
-        <!-- Única pantalla de error renderizada -->
+        <!-- Única pantalla de error -->
         <div id="unifiedErrorScreen">
             <div class="error-circle">!</div>
             <div class="error-text" id="unifiedErrorText">Este video no está disponible</div>
@@ -157,17 +162,12 @@
 
             if (watchdogTimer) clearTimeout(watchdogTimer);
 
-            // 1. Ocultar inmediatamente el player e iframe de YouTube
+            // Mantener el reproductor de YouTube totalmente oculto
             if (player) {
-                player.classList.add('is-hidden');
-                const frame = player.provider && player.provider.iframe;
-                if (frame) {
-                    frame.style.setProperty('opacity', '0', 'important');
-                    frame.style.setProperty('visibility', 'hidden', 'important');
-                }
+                player.classList.remove('is-ready');
             }
 
-            // 2. Mostrar la pantalla única
+            // Mostrar nuestro error
             if (errorText && msg) errorText.textContent = msg;
             if (errorScreen) errorScreen.classList.add('visible');
 
@@ -177,14 +177,6 @@
         function clearErrorState() {
             isErrorState = false;
             if (errorScreen) errorScreen.classList.remove('visible');
-            if (player) {
-                player.classList.remove('is-hidden');
-                const frame = player.provider && player.provider.iframe;
-                if (frame) {
-                    frame.style.removeProperty('opacity');
-                    frame.style.removeProperty('visibility');
-                }
-            }
         }
 
         function fitProviderFrame(attempt) {
@@ -208,6 +200,11 @@
             if (isErrorState) return;
             if (watchdogTimer) clearTimeout(watchdogTimer);
             clearErrorState();
+
+            // Revelar el reproductor SOLO cuando el video está listo y reproduciendo
+            if (player) {
+                player.classList.add('is-ready');
+            }
 
             if (!reportedReady) {
                 reportedReady = true;
@@ -239,6 +236,11 @@
             clearErrorState();
             if (watchdogTimer) clearTimeout(watchdogTimer);
 
+            // Ocultar inmediatamente el player al cambiar de track
+            if (player) {
+                player.classList.remove('is-ready');
+            }
+
             currentVid = vid;
             shouldAutoplay = !!auto;
             pendingStartTime = Math.max(0, Number(startAt) || 0);
@@ -267,24 +269,22 @@
                 if (pendingStartTime > 0) {
                     try { player.currentTime = pendingStartTime; } catch (e) {}
                 }
-                if (shouldAutoplay) safePlay();
-            };
-
-            player.addEventListener('loadedmetadata', function () {
-                if (activeToken === trackToken) {
-                    if (watchdogTimer) clearTimeout(watchdogTimer);
-                    attemptStart();
+                if (shouldAutoplay) {
+                    safePlay();
+                } else {
+                    // Si no es autoplay pero cargó datos válidos, podemos revelarlo
+                    onPlaybackSuccess();
                 }
-            }, { once: true });
+            };
 
             player.addEventListener('can-play', attemptStart, { once: true });
 
-            // Watchdog: Si en 6.5s no cargó metadata ni arrancó, el video está bloqueado
+            // Watchdog rápido (4s): Si en 4s no arranca, está bloqueado
             watchdogTimer = setTimeout(function () {
-                if (activeToken === trackToken && !reportedReady && (!player.currentTime || player.currentTime === 0)) {
+                if (activeToken === trackToken && !reportedReady) {
                     triggerUnifiedError('Este video no está disponible');
                 }
-            }, 6500);
+            }, 4000);
         }
 
         if (player) {
@@ -292,12 +292,12 @@
                 initTrack(videoId, autoplay === '1', startTime);
             }
 
-            // 1. Interceptar errores estándar de Vidstack
+            // Capturar errores de Vidstack
             player.addEventListener('error', function () {
                 triggerUnifiedError('Este video no está disponible');
             });
 
-            // 2. MutationObserver: Detectar si Vidstack marca internamente el error
+            // MutationObserver para atributos data-error
             const observer = new MutationObserver(function (mutations) {
                 for (let i = 0; i < mutations.length; i++) {
                     if (mutations[i].attributeName === 'data-error' && player.hasAttribute('data-error')) {
@@ -308,17 +308,16 @@
             });
             observer.observe(player, { attributes: true });
 
-            // 3. Sniffer de mensajes de YouTube y postMessage general
+            // Interceptación de eventos de YouTube
             window.addEventListener('message', function (ev) {
                 let data = ev.data;
 
-                // Si viene como string JSON desde YouTube, parsearlo
                 if (typeof data === 'string') {
                     try { data = JSON.parse(data); } catch (e) {}
                 }
 
                 if (data && typeof data === 'object') {
-                    // Detección de errores nativos de YouTube (2, 5, 100, 101, 150, 153)
+                    // Si YouTube emite su código de error interno
                     if (data.event === 'onError' || data.info === 150 || data.info === 101 || data.info === 100 || data.info === 2 || data.info === 5) {
                         triggerUnifiedError('Este video no está disponible');
                         return;
@@ -328,7 +327,7 @@
                         return;
                     }
 
-                    // Mensajes desde la aplicación padre (voice-eva)
+                    // Comandos desde la app padre (voice-eva)
                     if (data.source === 'voice-eva') {
                         switch (data.type) {
                             case 'load':
@@ -369,6 +368,7 @@
                 }
             });
 
+            // Confirmación real de reproducción
             player.addEventListener('time-update', function () {
                 if (player.currentTime > 0.05) {
                     onPlaybackSuccess();
