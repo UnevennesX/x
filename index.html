@@ -42,24 +42,10 @@
             max-width: none;
             position: absolute;
             inset: 0;
+            display: block;
+            overflow: hidden;
         }
 
-        #rmPlaybackError {
-            position: absolute;
-            inset: 0;
-            z-index: 2;
-            display: none;
-            place-content: center;
-            padding: 24px;
-            background: #000;
-            color: #f1f1f1;
-            text-align: center;
-            font: 600 14px/1.5 Arial, sans-serif;
-        }
-
-        #rmPlaybackError.visible { display: grid; }
-        #rmPlaybackError strong { display: block; margin-bottom: 6px; font-size: 16px; }
-        #rmPlaybackError small { color: #aaa; font-weight: 400; }
     </style>
 </head>
 <body>
@@ -67,9 +53,6 @@
         <media-player id="rmExternalPlayer" class="vds-player" load="eager" view-type="video" stream-type="on-demand" log-level="warn" crossorigin="" playsinline="" data-media-player="" tabindex="0" role="region" aria-label="Video Player" data-orientation="landscape">
             <media-provider></media-provider>
         </media-player>
-        <div id="rmPlaybackError" role="status" aria-live="polite">
-            <div><strong>Video no disponible</strong><small id="rmPlaybackErrorDetail"></small></div>
-        </div>
 
     </div>
 
@@ -80,15 +63,29 @@
         const startTime = parseFloat(params.get('t')) || 0;
 
         const player = document.getElementById('rmExternalPlayer');
-        const playbackError = document.getElementById('rmPlaybackError');
-        const playbackErrorDetail = document.getElementById('rmPlaybackErrorDetail');
+
+        function fitYouTubeFrame() {
+            if (!player || !player.shadowRoot) return;
+            const frame = player.shadowRoot.querySelector('iframe.vds-youtube');
+            if (!frame) return;
+            frame.style.width = '100%';
+            frame.style.height = '100%';
+            frame.style.minWidth = '0';
+            frame.style.minHeight = '0';
+            frame.style.position = 'absolute';
+            frame.style.inset = '0';
+        }
+
+        if (player && player.shadowRoot) {
+            new MutationObserver(fitYouTubeFrame).observe(player.shadowRoot, { childList: true, subtree: true });
+            fitYouTubeFrame();
+        }
 
         let currentVid = videoId || null;
         let shouldAutoplay = autoplay === '1';
         let endedReported = false;
         let reportedReady = false;
         let trackToken = 0;
-        let loadErrorTimer = null;
         let lastReportedTime = 0;
         let pendingStartTime = startTime;
 
@@ -96,30 +93,7 @@
             try { window.parent.postMessage(Object.assign({ source: 'x-player' }, m), '*'); } catch (e) {}
         }
 
-        function clearLoadErrorTimer() {
-            if (loadErrorTimer) {
-                clearTimeout(loadErrorTimer);
-                loadErrorTimer = null;
-            }
-        }
-
-        function clearPlaybackError() {
-            if (playbackError) playbackError.classList.remove('visible');
-            if (playbackErrorDetail) playbackErrorDetail.textContent = '';
-        }
-
-        function reportPlaybackError(code, detail) {
-            clearLoadErrorTimer();
-            const message = detail || ('Código ' + (code || 'desconocido'));
-            console.error('[x-player] Error de reproducción', { videoId: currentVid, code: code || null, detail: message });
-            if (playbackErrorDetail) playbackErrorDetail.textContent = message;
-            if (playbackError) playbackError.classList.add('visible');
-            postToParent({ type: 'playback_error', videoId: currentVid, code: code || null, detail: message });
-        }
-
         function onPlaybackSuccess() {
-            clearLoadErrorTimer();
-            clearPlaybackError();
             if (!reportedReady) {
                 reportedReady = true;
                 postToParent({ type: 'ready', videoId: currentVid });
@@ -155,14 +129,13 @@
             lastReportedTime = 0;
             trackToken += 1;
             const activeToken = trackToken;
-            clearLoadErrorTimer();
-            clearPlaybackError();
 
             try {
                 player.pause();
                 player.removeAttribute('src');
             } catch (e) {}
             player.src = 'youtube/' + vid;
+            fitYouTubeFrame();
             if (shouldAutoplay) {
                 player.setAttribute('autoplay', '');
             } else {
@@ -180,16 +153,6 @@
             player.addEventListener('loadedmetadata', attemptStart, { once: true });
             player.addEventListener('can-play', attemptStart, { once: true });
             setTimeout(attemptStart, 800);
-
-            if (shouldAutoplay) {
-                loadErrorTimer = setTimeout(function () {
-                    const duration = Number(player.duration) || 0;
-                    const readyState = Number(player.readyState) || 0;
-                    if (activeToken === trackToken && duration <= 0 && readyState < 1) {
-                        reportPlaybackError('LOAD_TIMEOUT', 'YouTube no entregó una fuente reproducible.');
-                    }
-                }, 8000);
-            }
         }
 
         if (player) {
@@ -219,11 +182,6 @@
                 onPlaybackSuccess();
             });
 
-            player.addEventListener('error', function (event) {
-                const detail = event.detail || event;
-                const code = detail && (detail.code || detail.data || (detail.cause && detail.cause.data));
-                reportPlaybackError(code, detail && detail.message);
-            });
 
             player.addEventListener('ended', notifyEnded);
 
