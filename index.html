@@ -39,21 +39,28 @@
             background: #000000;
         }
 
-        /* El reproductor permanece oculto hasta que el video empiece realmente */
+        /* El reproductor se mantiene en el DOM sin visibility:hidden para que el navegador no lo congele */
         #rmExternalPlayer {
             width: 100% !important;
             height: 100% !important;
             max-width: none !important;
             margin: 0 !important;
-            opacity: 0;
-            visibility: hidden;
-            transition: opacity 0.25s ease, visibility 0.25s ease;
             --media-font-family: inherit;
         }
 
-        #rmExternalPlayer.is-playing {
-            opacity: 1 !important;
-            visibility: visible !important;
+        /* Telón negro protector: cubre YouTube mientras carga para no ver cajas grises */
+        .video-cover {
+            position: absolute;
+            inset: 0;
+            background: #000000;
+            z-index: 10;
+            pointer-events: none;
+            opacity: 1;
+            transition: opacity 0.25s ease;
+        }
+
+        .video-cover.hidden {
+            opacity: 0 !important;
         }
 
         /* --- Spinner Minimalista --- */
@@ -124,6 +131,9 @@
 </head>
 <body>
     <div id="playerHost">
+        <!-- Telón negro que cubre la carga -->
+        <div id="videoCover" class="video-cover"></div>
+
         <!-- Spinner -->
         <div id="loadingSpinner" class="minimal-spinner active"></div>
 
@@ -149,6 +159,7 @@
         const ytIframe = document.getElementById('ytIframe');
 
         // Elementos UI
+        const videoCover = document.getElementById('videoCover');
         const spinner = document.getElementById('loadingSpinner');
         const errorView = document.getElementById('errorView');
         const errCode = document.getElementById('errCode');
@@ -186,8 +197,7 @@
             isRealPlaybackActive = false;
             lastExpectedAutoplay = false;
 
-            // Asegurar que el iframe de YouTube permanezca oculto
-            player.classList.remove('is-playing');
+            videoCover.classList.remove('hidden');
             hideSpinner();
 
             const num = Number(code);
@@ -196,10 +206,8 @@
             errCode.textContent = !isNaN(num) ? `ERROR ${num}` : 'ERROR DE REPRODUCCIÓN';
             errText.textContent = msg;
 
-            // Mostrar nuestro diseño de error
             errorView.classList.add('active');
 
-            // Destruir el iframe para cortar cualquier proceso o renderizado interno
             try {
                 if (player) player.src = '';
                 if (ytIframe) ytIframe.src = 'about:blank';
@@ -210,11 +218,11 @@
         }
 
         function triggerPlaybackStarted() {
-            if (hasActiveError) return;
+            if (hasActiveError || isRealPlaybackActive) return;
             isRealPlaybackActive = true;
             
-            // Mostrar reproductor cuando los fotogramas ya están activos
-            player.classList.add('is-playing');
+            // Destapar el video y ocultar spinner
+            videoCover.classList.add('hidden');
             hideSpinner();
             errorView.classList.remove('active');
 
@@ -243,6 +251,7 @@
 
             if (videoId) {
                 showSpinner();
+                videoCover.classList.remove('hidden');
                 player.src = 'youtube/' + videoId;
                 if (autoplay === '1') {
                     player.setAttribute('autoplay', '');
@@ -252,10 +261,8 @@
                 hideSpinner();
             }
 
-            // Solo mostramos el video cuando esté corriendo de verdad
-            player.addEventListener('playing', function() {
-                triggerPlaybackStarted();
-            });
+            // Eventos nativos de Vidstack
+            player.addEventListener('playing', triggerPlaybackStarted);
 
             player.addEventListener('time-update', function() {
                 if (!isRealPlaybackActive && player.currentTime > 0) {
@@ -263,7 +270,6 @@
                 }
             });
 
-            // Si entra en buffer y no hay error, mostrar spinner
             player.addEventListener('waiting', function() {
                 if (!hasActiveError && !isRealPlaybackActive) {
                     showSpinner();
@@ -283,23 +289,40 @@
                 }
             });
 
-            // Reintento de autoplay seguro
-            setInterval(function () {
-                if (lastExpectedAutoplay && !hasActiveError && !isRealPlaybackActive && player.paused) {
+            // Reintento activo de autoplay si está en pausa inicial
+            const autoPlayCheckInterval = setInterval(function () {
+                if (hasActiveError || isRealPlaybackActive) {
+                    clearInterval(autoPlayCheckInterval);
+                    return;
+                }
+                if (lastExpectedAutoplay && player.paused) {
                     safePlay();
                 }
-            }, 2000);
+            }, 800);
 
-            // Escucha de mensajes
+            // Escucha directa de mensajes (PostMessage de YouTube Iframe API y de la app padre)
             window.addEventListener('message', function (ev) {
-                // Captura inmediata de error 150 / 101 desde YouTube
-                if (typeof ev.data === 'string' && ev.data.includes('onError')) {
-                    try {
-                        const ytData = JSON.parse(ev.data);
-                        if (ytData.event === 'onError' && ytData.info) {
-                            triggerError(ytData.info);
-                        }
-                    } catch (e) {}
+                // Interceptar eventos de YouTube Iframe API
+                if (typeof ev.data === 'string') {
+                    // Si YouTube emite onError
+                    if (ev.data.includes('onError')) {
+                        try {
+                            const ytData = JSON.parse(ev.data);
+                            if (ytData.event === 'onError' && ytData.info) {
+                                triggerError(ytData.info);
+                            }
+                        } catch (e) {}
+                    }
+                    // Si YouTube emite onStateChange = 1 (PLAYING)
+                    if (ev.data.includes('onStateChange') || ev.data.includes('infoDelivery')) {
+                        try {
+                            const ytData = JSON.parse(ev.data);
+                            const state = ytData.info && ytData.info.playerState !== undefined ? ytData.info.playerState : ytData.info;
+                            if (state === 1) { // 1 = YT.PlayerState.PLAYING
+                                triggerPlaybackStarted();
+                            }
+                        } catch (e) {}
+                    }
                 }
 
                 const data = ev.data;
@@ -311,15 +334,13 @@
                                 hasActiveError = false;
                                 isRealPlaybackActive = false;
                                 
-                                // Ocultar reproductor y error previo
-                                player.classList.remove('is-playing');
+                                videoCover.classList.remove('hidden');
                                 errorView.classList.remove('active');
                                 
                                 currentVid = data.videoId;
                                 endedReported = false;
                                 reportedReady = false;
                                 
-                                // Mantener spinner activo durante la carga
                                 showSpinner();
                                 player.src = 'youtube/' + data.videoId;
 
