@@ -22,6 +22,7 @@
             height: 100%;
             overflow: hidden;
             background-color: #000;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
         }
 
         #playerHost,
@@ -30,11 +31,170 @@
             height: 100% !important;
             max-width: none !important;
             margin: 0 !important;
+            position: relative;
+        }
+
+        /* --- Pantalla de Error Super Profesional --- */
+        .player-error-overlay {
+            position: absolute;
+            inset: 0;
+            z-index: 9999;
+            background: radial-gradient(circle at center, rgba(20, 20, 26, 0.94) 0%, rgba(5, 5, 8, 0.98) 100%);
+            backdrop-filter: blur(14px);
+            -webkit-backdrop-filter: blur(14px);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 24px;
+            box-sizing: border-box;
+            opacity: 0;
+            pointer-events: none;
+            transition: opacity 0.35s cubic-bezier(0.16, 1, 0.3, 1);
+        }
+
+        .player-error-overlay.active {
+            opacity: 1;
+            pointer-events: auto;
+        }
+
+        .error-card {
+            background: rgba(255, 255, 255, 0.04);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            box-shadow: 0 20px 40px -10px rgba(0, 0, 0, 0.7), 0 0 0 1px rgba(255, 255, 255, 0.03);
+            border-radius: 20px;
+            padding: 32px 28px;
+            max-width: 440px;
+            width: 100%;
+            text-align: center;
+            color: #ffffff;
+            animation: cardScaleIn 0.35s cubic-bezier(0.16, 1, 0.3, 1);
+        }
+
+        @keyframes cardScaleIn {
+            from { transform: scale(0.94) translateY(8px); opacity: 0; }
+            to { transform: scale(1) translateY(0); opacity: 1; }
+        }
+
+        .error-icon-wrapper {
+            width: 60px;
+            height: 60px;
+            margin: 0 auto 18px;
+            background: rgba(239, 68, 68, 0.12);
+            border: 1px solid rgba(239, 68, 68, 0.25);
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: #ef4444;
+        }
+
+        .error-icon-wrapper svg {
+            width: 30px;
+            height: 30px;
+        }
+
+        .error-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            padding: 4px 10px;
+            border-radius: 20px;
+            background: rgba(239, 68, 68, 0.15);
+            border: 1px solid rgba(239, 68, 68, 0.3);
+            color: #fca5a5;
+            font-size: 11px;
+            font-weight: 700;
+            letter-spacing: 0.8px;
+            text-transform: uppercase;
+            margin-bottom: 12px;
+        }
+
+        .error-title {
+            font-size: 19px;
+            font-weight: 700;
+            margin: 0 0 10px;
+            color: #f8fafc;
+            line-height: 1.35;
+        }
+
+        .error-description {
+            font-size: 13.5px;
+            line-height: 1.55;
+            color: #94a3b8;
+            margin: 0 0 22px;
+        }
+
+        .error-actions {
+            display: flex;
+            gap: 10px;
+            justify-content: center;
+            flex-wrap: wrap;
+        }
+
+        .error-btn {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            padding: 10px 18px;
+            border-radius: 10px;
+            font-size: 13px;
+            font-weight: 600;
+            text-decoration: none;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            border: none;
+        }
+
+        .error-btn-primary {
+            background: #ff0000;
+            color: #ffffff;
+            box-shadow: 0 4px 14px rgba(255, 0, 0, 0.3);
+        }
+
+        .error-btn-primary:hover {
+            background: #e60000;
+            transform: translateY(-1px);
+            box-shadow: 0 6px 18px rgba(255, 0, 0, 0.4);
+        }
+
+        .error-btn-secondary {
+            background: rgba(255, 255, 255, 0.08);
+            color: #e2e8f0;
+            border: 1px solid rgba(255, 255, 255, 0.12);
+        }
+
+        .error-btn-secondary:hover {
+            background: rgba(255, 255, 255, 0.14);
+            color: #ffffff;
         }
     </style>
 </head>
 <body>
     <div id="playerHost">
+        <!-- Capa de Error UI -->
+        <div id="errorOverlay" class="player-error-overlay" aria-live="assertive">
+            <div class="error-card">
+                <div class="error-icon-wrapper">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <circle cx="12" cy="12" r="10"></circle>
+                        <line x1="4.93" y1="4.93" x2="19.07" y2="19.07"></line>
+                    </svg>
+                </div>
+                <div>
+                    <span id="errBadge" class="error-badge">ERROR 150</span>
+                </div>
+                <h3 id="errTitle" class="error-title">Reproducción no permitida</h3>
+                <p id="errDesc" class="error-description">El propietario de este video no permite que se reproduzca en sitios web o reproductores externos.</p>
+                
+                <div id="errActions" class="error-actions">
+                    <a id="ytDirectBtn" href="#" target="_blank" rel="noopener noreferrer" class="error-btn error-btn-primary">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M23.498 6.186a3.016 3.016 0 0 0-2.122-2.136C19.505 3.545 12 3.545 12 3.545s-7.505 0-9.377.505A3.017 3.017 0 0 0 .502 6.186C0 8.07 0 12 0 12s0 3.93.502 5.814a3.016 3.016 0 0 0 2.122 2.136c1.871.505 9.376.505 9.376.505s7.505 0 9.377-.505a3.015 3.015 0 0 0 2.122-2.136C24 15.93 24 12 24 12s0-3.93-.502-5.814zM9.545 15.568V8.432L15.818 12l-6.273 3.568z"/></svg>
+                        Ver en YouTube
+                    </a>
+                </div>
+            </div>
+        </div>
+
         <media-player id="rmExternalPlayer" class="vds-player" load="eager" view-type="video" stream-type="on-demand" log-level="warn" crossorigin="" playsinline="" data-media-player="" tabindex="0" role="region" aria-label="Video Player" data-orientation="landscape">
             <media-provider keep-alive="" data-media-provider="">
                 <iframe tabindex="-1" data-no-controls="" class="vds-youtube" aria-hidden="true" frameborder="0" allow="autoplay; fullscreen; encrypted-media; picture-in-picture; accelerometer; gyroscope"></iframe>
@@ -77,39 +237,90 @@
         const autoplay = params.get('autoplay');
         const player = document.getElementById('rmExternalPlayer');
 
-        // Mapeo explicativo de errores comunes de YouTube
-        const YT_ERRORS = {
-            2: 'Error 2: El parámetro contiene un valor no válido (ID de video incorrecto o mal formado).',
-            5: 'Error 5: El contenido solicitado no se puede reproducir en un reproductor HTML5.',
-            100: 'Error 100: El video no fue encontrado (ha sido eliminado o marcado como privado).',
-            101: 'Error 101: El propietario del video no permite que se reproduzca en reproductores insertados/embebidos.',
-            150: 'Error 150: El propietario del video no permite la reproducción en reproductores insertados/embebidos (Restricción de inserción).'
+        // Elementos de la interfaz de Error
+        const overlay = document.getElementById('errorOverlay');
+        const errBadge = document.getElementById('errBadge');
+        const errTitle = document.getElementById('errTitle');
+        const errDesc = document.getElementById('errDesc');
+        const ytDirectBtn = document.getElementById('ytDirectBtn');
+
+        // Diccionario semántico de errores
+        const ERROR_DEFINITIONS = {
+            150: {
+                badge: 'Código 150 · Restricción de inserción',
+                title: 'Reproducción restringida por el autor',
+                desc: 'El propietario del video ha bloqueado su reproducción en reproductores o sitios web insertados.',
+                showYoutubeBtn: true
+            },
+            101: {
+                badge: 'Código 101 · Restricción de inserción',
+                title: 'Reproducción restringida por el autor',
+                desc: 'Este contenido no puede ser reproducido de manera externa debido a políticas de inserción del canal.',
+                showYoutubeBtn: true
+            },
+            100: {
+                badge: 'Código 100 · No encontrado',
+                title: 'Video no disponible o eliminado',
+                desc: 'El video solicitado no existe, ha sido dado de baja o está configurado como privado.',
+                showYoutubeBtn: false
+            },
+            2: {
+                badge: 'Código 2 · Parámetro inválido',
+                title: 'Identificador de video inválido',
+                desc: 'El ID proporcionado contiene caracteres incorrectos o no se encuentra bien formado.',
+                showYoutubeBtn: false
+            },
+            5: {
+                badge: 'Código 5 · Error HTML5',
+                title: 'Error de reproducción HTML5',
+                desc: 'El reproductor no ha podido procesar el códec o formato de video solicitado.',
+                showYoutubeBtn: true
+            }
         };
 
-        function explainError(codeOrMsg) {
+        function showVisualError(codeOrMsg, vid) {
             const num = Number(codeOrMsg);
-            if (!isNaN(num) && YT_ERRORS[num]) {
-                return YT_ERRORS[num];
+            const def = (!isNaN(num) && ERROR_DEFINITIONS[num]) ? ERROR_DEFINITIONS[num] : {
+                badge: isNaN(num) ? 'Error de reproducción' : `Código ${num}`,
+                title: 'No se pudo reproducir el video',
+                desc: String(codeOrMsg || 'Ha ocurrido un problema inesperado al procesar el archivo multimedia.'),
+                showYoutubeBtn: true
+            };
+
+            errBadge.textContent = def.badge;
+            errTitle.textContent = def.title;
+            errDesc.textContent = def.desc;
+
+            if (def.showYoutubeBtn && vid) {
+                ytDirectBtn.href = 'https://www.youtube.com/watch?v=' + vid;
+                ytDirectBtn.style.display = 'inline-flex';
+            } else {
+                ytDirectBtn.style.display = 'none';
             }
-            return String(codeOrMsg || 'Error desconocido de reproducción');
+
+            overlay.classList.add('active');
+        }
+
+        function hideVisualError() {
+            overlay.classList.remove('active');
         }
 
         function postToParent(m) {
             try { window.parent.postMessage(Object.assign({ source: 'x-player' }, m), '*'); } catch (e) {}
         }
 
+        let isFatalError = false;
+
         function safePlay() {
-            if (!player) return;
+            if (!player || isFatalError) return;
             try {
                 const playPromise = player.play();
                 if (playPromise !== undefined && typeof playPromise.catch === 'function') {
                     playPromise.catch(function (err) {
-                        console.warn('[Vidstack/Player] Intento de reproducción automática bloqueado o fallido:', err.name, err.message);
+                        // Silenciar error si el medio no está listo o fue abortado
                     });
                 }
-            } catch (e) {
-                console.warn('[Vidstack/Player] Excepción en safePlay:', e);
-            }
+            } catch (e) {}
         }
 
         if (player) {
@@ -129,7 +340,7 @@
             }
 
             function markReady() {
-                if (reportedReady) return;
+                if (reportedReady || isFatalError) return;
                 reportedReady = true;
                 postToParent({ type: 'ready' });
             }
@@ -139,20 +350,23 @@
 
             // Manejador centralizado de errores
             function handlePlayerError(errorInfo, rawEvent) {
-                const detailedMsg = explainError(errorInfo);
-                
-                console.error('%c[Vidstack Video Error]', 'color: #ff3333; font-weight: bold;', {
+                if (isFatalError) return; // Evitar duplicar llamadas
+                isFatalError = true;
+                lastExpectedAutoplay = false; // Detener reintentos de autoplay
+
+                console.error('%c[Vidstack Video Error]', 'color: #ff3333; font-weight: bold; font-size: 12px;', {
                     videoId: currentVid,
                     error: errorInfo,
-                    explanation: detailedMsg,
                     rawEvent: rawEvent
                 });
+
+                showVisualError(errorInfo, currentVid);
 
                 postToParent({
                     type: 'error',
                     videoId: currentVid,
                     code: errorInfo,
-                    message: detailedMsg
+                    message: String(errorInfo)
                 });
             }
 
@@ -169,15 +383,16 @@
                 }
             });
 
+            // Reintento de autoplay seguro (se cancela si ocurre un error fatal)
             setInterval(function () {
-                if (lastExpectedAutoplay && player.paused) {
+                if (lastExpectedAutoplay && !isFatalError && player.paused) {
                     safePlay();
                 }
             }, 2500);
 
-            // Escuchar mensajes (tanto de la app padre como posibles eventos directos de YouTube)
+            // Escuchar eventos
             window.addEventListener('message', function (ev) {
-                // Capturar si el iframe de YouTube envía un error directo
+                // Captura directa de mensajes de YouTube Iframe API (ej. onError: 150)
                 if (typeof ev.data === 'string' && ev.data.includes('onError')) {
                     try {
                         const ytData = JSON.parse(ev.data);
@@ -193,6 +408,8 @@
                     switch (data.type) {
                         case 'load':
                             if (data.videoId) {
+                                isFatalError = false;
+                                hideVisualError();
                                 currentVid = data.videoId;
                                 endedReported = false;
                                 reportedReady = false;
@@ -208,7 +425,7 @@
 
                                 const onCanPlay = function () {
                                     player.removeEventListener('can-play', onCanPlay);
-                                    if (lastExpectedAutoplay) {
+                                    if (lastExpectedAutoplay && !isFatalError) {
                                         safePlay();
                                     }
                                 };
@@ -216,13 +433,12 @@
                             }
                             break;
                         case 'play':
-                            lastExpectedAutoplay = true;
-                            safePlay();
+                            if (!isFatalError) {
+                                lastExpectedAutoplay = true;
+                                safePlay();
+                            }
                             break;
                         case 'pause':
-                            lastExpectedAutoplay = false;
-                            try { player.pause(); } catch (e) {}
-                            break;
                         case 'stop':
                             lastExpectedAutoplay = false;
                             try { player.pause(); } catch (e) {}
