@@ -4,6 +4,9 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>Player</title>
+    <!-- Elimina la petición 404 de favicon -->
+    <link rel="icon" href="data:,">
+    
     <link rel="stylesheet" href="https://cdn.vidstack.io/player/theme.css">
     <link rel="stylesheet" href="https://cdn.vidstack.io/player/video.css">
     <script type="module" src="https://cdn.vidstack.io/player"></script>
@@ -49,9 +52,9 @@
         .minimal-spinner {
             position: absolute;
             z-index: 50;
-            width: 32px;
-            height: 32px;
-            border: 2.5px solid rgba(255, 255, 255, 0.12);
+            width: 30px;
+            height: 30px;
+            border: 2px solid rgba(255, 255, 255, 0.15);
             border-top-color: #ffffff;
             border-radius: 50%;
             animation: spin 0.75s linear infinite;
@@ -95,7 +98,7 @@
             font-weight: 600;
             letter-spacing: 1.2px;
             text-transform: uppercase;
-            color: #888888;
+            color: #777777;
             margin-bottom: 8px;
         }
 
@@ -103,7 +106,7 @@
             font-size: 14px;
             font-weight: 400;
             color: #e5e5e5;
-            max-width: 340px;
+            max-width: 320px;
             line-height: 1.5;
             margin: 0;
         }
@@ -135,10 +138,10 @@
             <a id="errAction" class="error-link" href="#" target="_blank" rel="noopener noreferrer" style="display: none;">Ver en YouTube</a>
         </div>
 
-        <!-- Reproductor sin controles innecesarios -->
-        <media-player id="rmExternalPlayer" class="vds-player" load="eager" view-type="video" stream-type="on-demand" log-level="warn" crossorigin="" playsinline="" data-media-player="" tabindex="0" role="region" aria-label="Video Player">
+        <!-- Player con poster vacío transparente para prevenir 404s -->
+        <media-player id="rmExternalPlayer" class="vds-player" load="eager" view-type="video" stream-type="on-demand" log-level="silent" crossorigin="" playsinline="" data-media-player="" tabindex="0" role="region" aria-label="Video Player" poster="data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7">
             <media-provider keep-alive="" data-media-provider="">
-                <iframe tabindex="-1" data-no-controls="" class="vds-youtube" aria-hidden="true" frameborder="0" allow="autoplay; fullscreen; encrypted-media; picture-in-picture; accelerometer; gyroscope"></iframe>
+                <iframe id="ytIframe" tabindex="-1" data-no-controls="" class="vds-youtube" aria-hidden="true" frameborder="0" allow="autoplay; fullscreen; encrypted-media; picture-in-picture; accelerometer; gyroscope"></iframe>
             </media-provider>
         </media-player>
     </div>
@@ -148,6 +151,7 @@
         const videoId = params.get('v');
         const autoplay = params.get('autoplay');
         const player = document.getElementById('rmExternalPlayer');
+        const ytIframe = document.getElementById('ytIframe');
 
         // Elementos UI
         const spinner = document.getElementById('loadingSpinner');
@@ -178,7 +182,16 @@
             }
         }
 
+        // Desconecta el iframe para detener la ejecución de scripts internos de YouTube
+        function terminateYouTubeEngine() {
+            try {
+                if (player) player.src = '';
+                if (ytIframe) ytIframe.src = 'about:blank';
+            } catch (e) {}
+        }
+
         function displayError(code) {
+            if (isFatalError) return;
             isFatalError = true;
             lastExpectedAutoplay = false;
             showSpinner(false);
@@ -197,6 +210,9 @@
             }
 
             errorView.classList.add('visible');
+
+            // Detener el iframe de YouTube de inmediato
+            terminateYouTubeEngine();
 
             console.error(`[Player Error] Code: ${code} | Video: ${currentVid}`);
             postToParent({ type: 'error', videoId: currentVid, code: code, message: msg });
@@ -254,7 +270,7 @@
             });
 
             player.addEventListener('waiting', function() {
-                showSpinner(true);
+                if (!isFatalError) showSpinner(true);
             });
 
             player.addEventListener('error', function(event) {
@@ -270,14 +286,14 @@
                 }
             });
 
-            // Reintento limpio de autoplay
+            // Reintento seguro (se detiene si hay error)
             setInterval(function () {
                 if (lastExpectedAutoplay && !isFatalError && player.paused) {
                     safePlay();
                 }
             }, 2500);
 
-            // Escuchar mensajes (Parent & YouTube iframe)
+            // Escuchar eventos
             window.addEventListener('message', function (ev) {
                 // Interceptar error directo de YouTube
                 if (typeof ev.data === 'string' && ev.data.includes('onError')) {
