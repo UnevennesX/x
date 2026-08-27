@@ -2,150 +2,182 @@
 <html lang="es">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Media Player</title>
-    
-    <!-- Librería de Vidstack Player -->
-    <link rel="stylesheet" href="https://cdn.vidstack.io/player/theme.css" />
-    <link rel="stylesheet" href="https://cdn.vidstack.io/player/video.css" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="referrer" content="strict-origin-when-cross-origin">
+    <title>Player</title>
+    <link rel="stylesheet" href="https://cdn.vidstack.io/player/theme.css">
+    <link rel="stylesheet" href="https://cdn.vidstack.io/player/video.css">
     <script type="module" src="https://cdn.vidstack.io/player"></script>
+    <script type="module" src="https://cdn.vidstack.io/icons"></script>
+    
+    <link rel="preconnect" href="https://www.google.com" crossorigin="true">
+    <link rel="preconnect" href="https://i.ytimg.com" crossorigin="true">
+    <link rel="preconnect" href="https://googleads.g.doubleclick.net" crossorigin="true">
+    <link rel="preconnect" href="https://static.doubleclick.net" crossorigin="true">
 
     <style>
         * {
+            box-sizing: border-box;
+            user-select: none;
             margin: 0;
             padding: 0;
-            box-sizing: border-box;
         }
 
         html, body {
             width: 100%;
             height: 100%;
-            background: #000;
             overflow: hidden;
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-            user-select: none;
+            background-color: #0f0f0f;
+            font-family: "YouTube Sans", "Roboto", -apple-system, BlinkMacSystemFont, Arial, sans-serif;
+            color: #f1f1f1;
+            -webkit-font-smoothing: antialiased;
         }
 
         #playerHost {
+            width: 100% !important;
+            height: 100% !important;
             position: relative;
-            width: 100%;
-            height: 100%;
-            background: #000;
+            background-color: #0f0f0f;
             overflow: hidden;
         }
 
-        /* Ocultamiento estricto hasta confirmar reproducción real */
+        /* Ocultamiento estricto del reproductor hasta confirmar reproducción real */
         #rmExternalPlayer {
             width: 100% !important;
             height: 100% !important;
+            max-width: none !important;
+            margin: 0 !important;
+            position: absolute;
+            inset: 0;
+            visibility: hidden !important;
             opacity: 0;
-            transition: opacity 0.25s ease-in-out;
+            transition: opacity 0.2s ease-in;
         }
 
         #rmExternalPlayer.vds-visible {
+            visibility: visible !important;
             opacity: 1;
         }
 
-        /* Cortina de carga protectora */
+        /* Cortina protectora para evitar cualquier destello nativo */
         .rm-curtain {
             position: absolute;
             inset: 0;
-            background: #000;
-            z-index: 10;
+            z-index: 9999;
+            background-color: #0f0f0f;
             display: flex;
             align-items: center;
             justify-content: center;
-            transition: opacity 0.3s ease, visibility 0.3s;
         }
 
         .rm-curtain.hidden {
-            opacity: 0;
-            visibility: hidden;
-            pointer-events: none;
+            display: none;
         }
 
-        /* Spinner de carga */
         .rm-spinner {
-            width: 44px;
-            height: 44px;
-            border: 3px solid rgba(255, 255, 255, 0.15);
-            border-top-color: #ff0000;
+            width: 32px;
+            height: 32px;
+            border: 3px solid rgba(255, 255, 255, 0.12);
+            border-top-color: #f1f1f1;
             border-radius: 50%;
-            animation: rm-spin 0.8s linear infinite;
+            animation: spin 0.8s linear infinite;
         }
 
-        @keyframes rm-spin {
+        @keyframes spin {
             to { transform: rotate(360deg); }
         }
 
-        /* Pantalla de Error Centrada */
-        .rm-error-overlay {
+        /* Interfaz de Error 100% Centrada */
+        .rm-error-layer {
             position: absolute;
             inset: 0;
-            background: #0f0f0f;
-            z-index: 20;
+            z-index: 99999;
+            background-color: #121212;
             display: none;
+            align-items: center;
+            justify-content: center;
+            padding: 24px;
+        }
+
+        .rm-error-layer.active {
+            display: flex;
+        }
+
+        .rm-yt-error-box {
+            display: flex;
             flex-direction: column;
             align-items: center;
             justify-content: center;
             text-align: center;
-            padding: 24px;
-            color: #fff;
+            max-width: 460px;
+            width: 100%;
             gap: 12px;
-        }
-
-        .rm-error-overlay.active {
-            display: flex;
         }
 
         /* Ícono nativo centrado */
         .rm-yt-icon {
             width: 56px;
             height: 56px;
-            fill: #ff0000;
-            margin-bottom: 4px;
+            color: #888888;
+            margin-bottom: 2px;
+        }
+
+        .rm-yt-details {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            text-align: center;
+            gap: 6px;
+            width: 100%;
         }
 
         .rm-yt-title {
-            font-size: 1.15rem;
-            font-weight: 600;
+            font-size: 1.3rem;
+            font-weight: 700;
             color: #f1f1f1;
+            line-height: 1.25;
+            letter-spacing: -0.01em;
         }
 
         .rm-yt-reason {
-            font-size: 0.9rem;
-            color: #aaa;
+            font-size: 0.92rem;
+            line-height: 1.45;
+            color: #aaaaaa;
             max-width: 360px;
-            line-height: 1.4;
         }
 
         /* Mensaje de cuenta regresiva centrado */
         .rm-yt-countdown-msg {
             display: none;
             margin-top: 8px;
-            font-size: 0.85rem;
-            color: #888;
+            font-size: 0.84rem;
+            color: #888888;
+            line-height: 1.4;
         }
 
         .rm-yt-countdown-msg.visible {
             display: block;
         }
 
-        .rm-skip-btn {
-            margin-top: 10px;
-            background: #272727;
-            color: #fff;
-            border: 1px solid #3f3f3f;
-            padding: 8px 18px;
-            border-radius: 18px;
-            font-size: 0.85rem;
-            font-weight: 500;
-            cursor: pointer;
-            transition: background 0.2s;
+        .rm-yt-countdown-msg strong {
+            color: #f1f1f1;
+            font-weight: 600;
         }
 
-        .rm-skip-btn:hover {
-            background: #3f3f3f;
+        @media (max-width: 640px) {
+            .rm-error-layer {
+                padding: 16px;
+            }
+            .rm-yt-icon {
+                width: 46px;
+                height: 46px;
+            }
+            .rm-yt-title {
+                font-size: 1.15rem;
+            }
+            .rm-yt-reason {
+                font-size: 0.85rem;
+            }
         }
     </style>
 </head>
@@ -156,24 +188,8 @@
             <div class="rm-spinner"></div>
         </div>
 
-        <!-- Reproductor limpio sin botones que no respondan -->
-        <media-player 
-            id="rmExternalPlayer" 
-            class="vds-player" 
-            load="eager" 
-            view-type="video" 
-            stream-type="on-demand" 
-            log-level="warn" 
-            crossorigin="" 
-            playsinline="" 
-            data-media-player="" 
-            tabindex="0" 
-            role="region" 
-            aria-label="Video Player" 
-            data-orientation="landscape">
-            
+        <media-player id="rmExternalPlayer" class="vds-player" load="eager" view-type="video" stream-type="on-demand" log-level="warn" crossorigin="" playsinline="" data-media-player="" tabindex="0" role="region" aria-label="Video Player" data-orientation="landscape">
             <media-provider></media-provider>
-            
             <media-controls class="vds-controls" role="group" style="pointer-events: none;">
                 <media-controls-group class="vds-controls-group top-right" style="pointer-events: auto;">
                     <media-menu class="vds-menu" data-root="" data-disabled="" style="display: contents;">
@@ -186,102 +202,107 @@
         </media-player>
 
         <!-- Pantalla de Error Centrada -->
-        <div id="errorOverlay" class="rm-error-overlay">
-            <svg class="rm-yt-icon" viewBox="0 0 24 24">
-                <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-2h2v2zm0-4h-2V7h2v6z"/>
-            </svg>
-            <div id="errorTitle" class="rm-yt-title">Video no disponible</div>
-            <div id="errorReason" class="rm-yt-reason">Restringido por derechos de autor.</div>
-            <div id="countdownBox" class="rm-yt-countdown-msg">
-                Pasando al siguiente en <span id="countdownSecs">3</span>s...
+        <div id="rmErrorOverlay" class="rm-error-layer">
+            <div class="rm-yt-error-box">
+                <svg class="rm-yt-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                    <circle cx="12" cy="12" r="10"></circle>
+                    <line x1="12" y1="8" x2="12" y2="12"></line>
+                    <line x1="12" y1="16" x2="12.01" y2="16"></line>
+                </svg>
+
+                <div class="rm-yt-details">
+                    <h2 class="rm-yt-title" id="rmErrorTitle">Video no disponible</h2>
+                    <p class="rm-yt-reason" id="rmErrorReason">Restringido por derechos de autor.</p>
+                    
+                    <p class="rm-yt-countdown-msg" id="rmCountdownBox">
+                        Pasando al siguiente video en <strong id="rmCountdownNumber">5</strong> s...
+                    </p>
+                </div>
             </div>
-            <button class="rm-skip-btn" onclick="skipVideo()">Saltar video</button>
         </div>
     </div>
 
     <script>
-        const urlParams = new URLSearchParams(window.location.search);
-        let videoId = urlParams.get('v') || urlParams.get('videoId') || '';
-        const autoplay = urlParams.get('autoplay') || '1';
-        const startTime = Math.max(0, Number(urlParams.get('t') || urlParams.get('start')) || 0);
-
+        const params = new URLSearchParams(window.location.search);
+        const videoId = params.get('v');
+        const autoplay = params.get('autoplay');
+        const startTime = parseFloat(params.get('t')) || 0;
         const player = document.getElementById('rmExternalPlayer');
         const curtain = document.getElementById('rmCurtain');
-        const errorOverlay = document.getElementById('errorOverlay');
-        const errorTitle = document.getElementById('errorTitle');
-        const errorReason = document.getElementById('errorReason');
-        const countdownBox = document.getElementById('countdownBox');
-        const countdownSecs = document.getElementById('countdownSecs');
 
-        let currentVid = videoId;
+        const errorOverlay = document.getElementById('rmErrorOverlay');
+        const errorTitle = document.getElementById('rmErrorTitle');
+        const errorReason = document.getElementById('rmErrorReason');
+        const countdownBox = document.getElementById('rmCountdownBox');
+        const countdownNumber = document.getElementById('rmCountdownNumber');
+
+        let countdownTimer = null;
+        let countdownSec = 5;
+        let currentVid = videoId || null;
+        let lastExpectedAutoplay = autoplay === '1';
+        let hasNextInQueue = params.get('hasNext') === '1';
         let isFatalError = false;
-        let hasNextInQueue = false;
         let endedThisVideo = false;
         let endedReported = false;
         let reportedReady = false;
-        let lastExpectedAutoplay = (autoplay === '1');
-        
-        let hangWatchdog = null;
-        let countdownTimer = null;
+        let hangWatchdogTimer = null;
+        let playbackConfirmed = false;
 
-        function postToParent(msg) {
-            try {
-                if (window.parent && window.parent !== window) {
-                    window.parent.postMessage({ source: 'room-player', ...msg }, '*');
-                }
-            } catch (e) {}
+        function postToParent(m) {
+            try { window.parent.postMessage(Object.assign({ source: 'x-player' }, m), '*'); } catch (e) {}
         }
 
         function showCurtain() {
+            playbackConfirmed = false;
             curtain.classList.remove('hidden');
             player.classList.remove('vds-visible');
         }
 
         function hideCurtain() {
+            playbackConfirmed = true;
             curtain.classList.add('hidden');
             player.classList.add('vds-visible');
         }
 
         function hideOverlay() {
-            errorOverlay.classList.remove('active');
-            countdownBox.classList.remove('visible');
             if (countdownTimer) {
                 clearInterval(countdownTimer);
                 countdownTimer = null;
             }
             isFatalError = false;
+            errorOverlay.classList.remove('active');
+            countdownBox.classList.remove('visible');
+        }
+
+        function clearHangWatchdog() {
+            if (hangWatchdogTimer) {
+                clearTimeout(hangWatchdogTimer);
+                hangWatchdogTimer = null;
+            }
         }
 
         function startHangWatchdog() {
             clearHangWatchdog();
-            hangWatchdog = setTimeout(function () {
-                if (!reportedReady && !isFatalError) {
+            hangWatchdogTimer = setTimeout(function () {
+                if (!playbackConfirmed && !isFatalError) {
                     triggerCustomError(150);
                 }
-            }, 12000);
-        }
-
-        function clearHangWatchdog() {
-            if (hangWatchdog) {
-                clearTimeout(hangWatchdog);
-                hangWatchdog = null;
-            }
+            }, 4500);
         }
 
         function startCountdown() {
             if (countdownTimer) clearInterval(countdownTimer);
-            let count = 3;
-            countdownSecs.textContent = count;
+            countdownSec = 5;
+            countdownNumber.textContent = countdownSec;
             countdownBox.classList.add('visible');
 
             countdownTimer = setInterval(function () {
-                count--;
-                if (count <= 0) {
+                countdownSec--;
+                countdownNumber.textContent = countdownSec;
+                if (countdownSec <= 0) {
                     clearInterval(countdownTimer);
                     countdownTimer = null;
                     skipVideo();
-                } else {
-                    countdownSecs.textContent = count;
                 }
             }, 1000);
         }
@@ -290,12 +311,12 @@
             clearHangWatchdog();
             isFatalError = true;
 
-            // Ocultar iframe de YouTube para evitar destellos
+            // Ocultar iframe de YouTube para que no destelle el error nativo
             player.classList.remove('vds-visible');
             curtain.classList.add('hidden');
 
             errorTitle.textContent = 'Video no disponible';
-            errorReason.textContent = 'Restringido o no disponible para reproducir aquí.';
+            errorReason.textContent = 'Restringido por derechos de autor.';
             errorOverlay.classList.add('active');
 
             try { player.pause(); } catch (e) {}
