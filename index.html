@@ -3,608 +3,242 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <meta name="referrer" content="strict-origin-when-cross-origin">
-    <title>Player</title>
-
-    <!-- Vidstack Player CSS & JS -->
-    <link rel="stylesheet" href="https://cdn.vidstack.io/player/theme.css">
-    <link rel="stylesheet" href="https://cdn.vidstack.io/player/video.css">
-    <script type="module" src="https://cdn.vidstack.io/player"></script>
-    <script type="module" src="https://cdn.vidstack.io/icons"></script>
-    
-    <link rel="preconnect" href="https://www.google.com" crossorigin="true">
-    <link rel="preconnect" href="https://i.ytimg.com" crossorigin="true">
-
+    <title>Headless Player</title>
     <style>
         * {
             box-sizing: border-box;
-            user-select: none;
-            margin: 0;
-            padding: 0;
         }
 
         html, body {
+            margin: 0;
+            padding: 0;
             width: 100%;
             height: 100%;
             overflow: hidden;
-            background-color: #000000;
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-            color: #ffffff;
-            -webkit-font-smoothing: antialiased;
+            background-color: #000;
         }
 
+        /* Contenedor que recorta cualquier barra o título forzado por YouTube */
         #playerHost {
+            position: absolute;
+            top: 0;
+            left: 0;
             width: 100%;
             height: 100%;
-            position: relative;
-            background-color: #000000;
             overflow: hidden;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            pointer-events: none; /* Desactiva interacción de mouse/touch para que YouTube no muestre overlays */
+            user-select: none;
         }
 
-        #rmExternalPlayer {
+        /* Escalado sutil para ocultar los márgenes de 1-2px donde YouTube coloca títulos o marcas */
+        #ytWrapper {
+            width: 100%;
+            height: 100%;
+            transform: scale(1.05);
+            transform-origin: center center;
+        }
+
+        #ytWrapper iframe,
+        #ytPlayer {
             width: 100% !important;
             height: 100% !important;
-            position: absolute;
-            inset: 0;
-            visibility: hidden;
-            opacity: 0;
-            transition: opacity 0.2s ease;
-        }
-
-        #rmExternalPlayer.vds-visible {
-            visibility: visible;
-            opacity: 1;
-        }
-
-        /* Cortina de carga minimalista */
-        .rm-curtain {
-            position: absolute;
-            inset: 0;
-            background-color: #000000;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            z-index: 10;
-            transition: opacity 0.2s ease;
-        }
-
-        .rm-curtain.hidden {
-            opacity: 0;
-            pointer-events: none;
-        }
-
-        .rm-spinner {
-            width: 32px;
-            height: 32px;
-            border: 2px solid rgba(255, 255, 255, 0.15);
-            border-top-color: #ffffff;
-            border-radius: 50%;
-            animation: spin 0.7s linear infinite;
-        }
-
-        @keyframes spin {
-            to { transform: rotate(360deg); }
-        }
-
-        /* Capa de Error Minimalista */
-        .rm-error-layer {
-            position: absolute;
-            inset: 0;
-            background-color: #0a0a0a;
-            display: none;
-            align-items: center;
-            justify-content: center;
-            padding: 24px;
-            z-index: 20;
-        }
-
-        .rm-error-layer.active {
-            display: flex;
-        }
-
-        .rm-error-box {
-            max-width: 420px;
-            width: 100%;
-            text-align: center;
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            gap: 12px;
-        }
-
-        .rm-error-title {
-            font-size: 1.1rem;
-            font-weight: 600;
-            color: #ffffff;
-        }
-
-        .rm-error-reason {
-            font-size: 0.88rem;
-            line-height: 1.45;
-            color: #888888;
-            word-break: break-word;
-        }
-
-        .rm-error-code {
-            font-size: 0.75rem;
-            font-family: monospace;
-            color: #555555;
-            margin-top: 2px;
-        }
-
-        .rm-countdown-msg {
-            display: none;
-            font-size: 0.82rem;
-            color: #777777;
-            margin-top: 6px;
-        }
-
-        .rm-countdown-msg.visible {
+            border: 0 !important;
             display: block;
-        }
-
-        .rm-countdown-sec {
-            font-weight: 600;
-            color: #ffffff;
-        }
-
-        .rm-btn-skip {
-            margin-top: 10px;
-            padding: 8px 18px;
-            background: #1c1c1c;
-            color: #eeeeee;
-            border: 1px solid #2e2e2e;
-            border-radius: 6px;
-            font-size: 0.82rem;
-            font-weight: 500;
-            cursor: pointer;
-            transition: background 0.15s ease;
-        }
-
-        .rm-btn-skip:hover {
-            background: #2a2a2a;
-            color: #ffffff;
         }
     </style>
 </head>
 <body>
     <div id="playerHost">
-        <!-- Cortina de carga -->
-        <div id="rmCurtain" class="rm-curtain">
-            <div class="rm-spinner"></div>
-        </div>
-
-        <!-- Reproductor Vidstack -->
-        <media-player id="rmExternalPlayer" playsinline>
-            <media-provider></media-provider>
-            <media-video-layout></media-video-layout>
-        </media-player>
-
-        <!-- Capa de Error -->
-        <div id="rmErrorOverlay" class="rm-error-layer">
-            <div class="rm-error-box">
-                <div id="rmErrorTitle" class="rm-error-title">No se pudo reproducir</div>
-                <div id="rmErrorReason" class="rm-error-reason">Ocurrió un error al cargar el video.</div>
-                <div id="rmErrorCode" class="rm-error-code"></div>
-                <div id="rmCountdownBox" class="rm-countdown-msg">
-                    Siguiente video en <span id="rmCountdownSec" class="rm-countdown-sec">5</span>s
-                </div>
-                <button id="rmBtnSkip" class="rm-btn-skip" style="display: none;">Saltar video</button>
-            </div>
+        <div id="ytWrapper">
+            <div id="ytPlayer"></div>
         </div>
     </div>
 
     <script>
-        const urlParams = new URLSearchParams(window.location.search);
-        const videoId = urlParams.get('v') || urlParams.get('videoId') || 'M7lc1UVf-VE';
-        const autoplay = urlParams.get('autoplay') || '0';
-        const startTime = Math.max(0, Number(urlParams.get('t') || urlParams.get('time')) || 0);
+        const params = new URLSearchParams(window.location.search);
+        let videoId = params.get('v') || '';
+        let autoplay = params.get('autoplay') === '1';
+        let startTime = parseFloat(params.get('t')) || 0;
 
-        const player = document.getElementById('rmExternalPlayer');
-        const curtain = document.getElementById('rmCurtain');
-        const errorOverlay = document.getElementById('rmErrorOverlay');
-        const errorTitle = document.getElementById('rmErrorTitle');
-        const errorReason = document.getElementById('rmErrorReason');
-        const errorCodeTag = document.getElementById('rmErrorCode');
-        const countdownBox = document.getElementById('rmCountdownBox');
-        const countdownSec = document.getElementById('rmCountdownSec');
-        const btnSkip = document.getElementById('rmBtnSkip');
-
+        let player = null;
+        let isReady = false;
         let currentVid = videoId;
-        let isFatalError = false;
-        let hasNextInQueue = false;
-        let countdownTimer = null;
-        let watchdogTimer = null;
-        let reportedReady = false;
-        let endedThisVideo = false;
         let endedReported = false;
-        let lastExpectedAutoplay = false;
+        let durationPollInterval = null;
 
-        // Mapeo a mensajes reales basados en la especificación oficial de la API de YouTube
-        function getRealErrorMessage(code, rawMsg) {
-            if (rawMsg && typeof rawMsg === 'string' && rawMsg.trim().length > 0 && !rawMsg.includes('[object')) {
-                return {
-                    title: 'Error de reproducción',
-                    reason: rawMsg
-                };
-            }
-
-            const numericCode = Number(code);
-            switch (numericCode) {
-                case 2:
-                    return {
-                        title: 'Parámetro no válido',
-                        reason: 'El identificador del video contiene caracteres no válidos o es incorrecto.'
-                    };
-                case 5:
-                    return {
-                        title: 'Error de HTML5',
-                        reason: 'El contenido no se puede reproducir en el reproductor HTML5.'
-                    };
-                case 100:
-                    return {
-                        title: 'Video no encontrado',
-                        reason: 'El video no existe, ha sido eliminado o está configurado como privado.'
-                    };
-                case 101:
-                case 150:
-                    return {
-                        title: 'Inserción no permitida',
-                        reason: 'El propietario del video no permite reproducirlo en reproductores externos o sitios web.'
-                    };
-                case 153:
-                case 155:
-                    return {
-                        title: 'Restricción de región',
-                        reason: 'El video no está disponible en este país o dominio.'
-                    };
-                case 408:
-                    return {
-                        title: 'Tiempo de espera agotado',
-                        reason: 'El video tardó demasiado en responder o la conexión fue interrumpida.'
-                    };
-                default:
-                    return {
-                        title: 'Error de reproducción',
-                        reason: 'No se pudo cargar el video debido a una falla inesperada del reproductor.'
-                    };
-            }
-        }
-
-        function postToParent(msg) {
+        function postToParent(m) {
             try {
-                if (window.parent && window.parent !== window) {
-                    window.parent.postMessage({ source: 'room-player', ...msg }, '*');
-                }
+                window.parent.postMessage(Object.assign({ source: 'x-player' }, m), '*');
             } catch (e) {}
         }
 
-        function showCurtain() {
-            curtain.classList.remove('hidden');
-        }
+        // Carga dinámica y ligera de la API oficial de YouTube (Sin frameworks externos)
+        const tag = document.createElement('script');
+        tag.src = "https://www.youtube.com/iframe_api";
+        const firstScriptTag = document.getElementsByTagName('script')[0];
+        firstScriptTag.parentNode.insertBefore(tag, firstScriptTag);
 
-        function hideCurtain() {
-            curtain.classList.add('hidden');
-            player.classList.add('vds-visible');
-        }
-
-        function hideOverlay() {
-            errorOverlay.classList.remove('active');
-            countdownBox.classList.remove('visible');
-            btnSkip.style.display = 'none';
-            if (countdownTimer) {
-                clearInterval(countdownTimer);
-                countdownTimer = null;
-            }
-            isFatalError = false;
-        }
-
-        function startHangWatchdog() {
-            clearHangWatchdog();
-            watchdogTimer = setTimeout(function () {
-                if (!reportedReady && !isFatalError) {
-                    triggerCustomError(408, 'Tiempo de espera agotado al conectar con el servidor.');
-                }
-            }, 12000);
-        }
-
-        function clearHangWatchdog() {
-            if (watchdogTimer) {
-                clearTimeout(watchdogTimer);
-                watchdogTimer = null;
-            }
-        }
-
-        function startCountdown() {
-            let left = 5;
-            countdownSec.textContent = left;
-            countdownBox.classList.add('visible');
-            btnSkip.style.display = 'inline-block';
-
-            if (countdownTimer) clearInterval(countdownTimer);
-            countdownTimer = setInterval(function () {
-                left--;
-                if (left <= 0) {
-                    clearInterval(countdownTimer);
-                    countdownTimer = null;
-                    skipVideo();
-                } else {
-                    countdownSec.textContent = left;
-                }
-            }, 1000);
-        }
-
-        btnSkip.addEventListener('click', skipVideo);
-
-        function triggerCustomError(code, customMessage) {
-            clearHangWatchdog();
-            isFatalError = true;
-
-            player.classList.remove('vds-visible');
-            curtain.classList.add('hidden');
-
-            const errorInfo = getRealErrorMessage(code, customMessage);
-            errorTitle.textContent = errorInfo.title;
-            errorReason.textContent = errorInfo.reason;
-            errorCodeTag.textContent = code ? `Código: ${code}` : '';
-
-            errorOverlay.classList.add('active');
-
-            try { player.pause(); } catch (e) {}
-            postToParent({ type: 'error', code: Number(code) || 150, videoId: currentVid, message: errorInfo.reason });
-
-            if (hasNextInQueue) {
-                startCountdown();
-            } else {
-                if (countdownTimer) {
-                    clearInterval(countdownTimer);
-                    countdownTimer = null;
-                }
-                countdownBox.classList.remove('visible');
-            }
-        }
-
-        function skipVideo() {
-            hideOverlay();
-            clearHangWatchdog();
-            postToParent({ type: 'skip_fatal', videoId: currentVid });
-        }
-
-        // Detección de mensajes emitidos por el iframe de YouTube
-        window.addEventListener('message', function (ev) {
-            try {
-                let data = ev.data;
-                if (typeof data === 'string') data = JSON.parse(data);
-                if (data) {
-                    if (data.event === 'onError' || [2, 5, 100, 101, 150, 153, 155].includes(Number(data.info))) {
-                        const code = data.info || (data.data && data.data.code) || 150;
-                        const msg = data.data && data.data.message ? data.data.message : null;
-                        triggerCustomError(code, msg);
-                    }
-                }
-            } catch (err) {}
-        });
-
-        function safePlay() {
-            if (!player || isFatalError) return;
-            try {
-                const p = player.play();
-                if (p && typeof p.catch === 'function') p.catch(function () {});
-            } catch (e) {}
-        }
-
-        if (player) {
-            if (autoplay !== '1') player.removeAttribute('autoplay');
-
-            if (videoId) {
-                showCurtain();
-                player.src = 'youtube/' + videoId;
-                startHangWatchdog();
-
-                if (autoplay === '1') {
-                    player.setAttribute('autoplay', '');
-                    lastExpectedAutoplay = true;
-                }
-                if (startTime > 0) {
-                    const onReadySeek = function () {
-                        player.removeEventListener('can-play', onReadySeek);
-                        try { player.currentTime = startTime; } catch (e) {}
-                    };
-                    player.addEventListener('can-play', onReadySeek);
-                }
-            }
-
-            function onPlaybackSuccess() {
-                if (isFatalError) return;
-                clearHangWatchdog();
-                hideOverlay();
-                hideCurtain();
-                if (!reportedReady) {
-                    reportedReady = true;
-                    postToParent({ type: 'ready' });
-                }
-            }
-
-            player.addEventListener('can-play', onPlaybackSuccess);
-            player.addEventListener('playing', onPlaybackSuccess);
-            player.addEventListener('time-update', function () {
-                if (player.currentTime > 0.05 && !isFatalError) {
-                    onPlaybackSuccess();
+        window.onYouTubeIframeAPIReady = function () {
+            player = new YT.Player('ytPlayer', {
+                width: '100%',
+                height: '100%',
+                videoId: videoId,
+                playerVars: {
+                    autoplay: autoplay ? 1 : 0,
+                    controls: 0,          // 0 interfaz de reproducción
+                    disablekb: 1,         // Desactiva teclado
+                    fs: 0,                // Desactiva botón pantalla completa
+                    iv_load_policy: 3,    // Oculta anotaciones y tarjetas
+                    modestbranding: 1,    // Minimiza logos
+                    rel: 0,               // Evita videos relacionados de otros canales
+                    playsinline: 1,
+                    origin: window.location.origin,
+                    start: Math.floor(startTime)
+                },
+                events: {
+                    'onReady': onPlayerReady,
+                    'onStateChange': onPlayerStateChange,
+                    'onError': onPlayerError
                 }
             });
+        };
 
-            // Captura de errores nativos desde Vidstack
-            player.addEventListener('error', function (ev) {
-                const detail = ev.detail || ev;
-                let ytCode = 150;
-                let errorMsg = null;
+        function onPlayerReady() {
+            isReady = true;
+            postToParent({ type: 'ready' });
+            reportDuration();
 
-                if (detail) {
-                    if (typeof detail.code === 'number') ytCode = detail.code;
-                    else if (typeof detail.data === 'number') ytCode = detail.data;
-                    else if (detail.cause && typeof detail.cause.data === 'number') ytCode = detail.cause.data;
+            if (autoplay) {
+                try { player.playVideo(); } catch (e) {}
+            }
+        }
 
-                    if (detail.message) errorMsg = detail.message;
-                    else if (detail.cause && detail.cause.message) errorMsg = detail.cause.message;
-                }
-                triggerCustomError(ytCode, errorMsg);
-            });
-
-            player.addEventListener('ended', function () {
-                endedThisVideo = true;
+        function onPlayerStateChange(event) {
+            // YT.PlayerState.PLAYING = 1
+            if (event.data === 1) {
+                endedReported = false;
+                reportDuration();
+            }
+            // YT.PlayerState.ENDED = 0
+            if (event.data === 0) {
                 if (!endedReported) {
                     endedReported = true;
                     postToParent({ type: 'ended', videoId: currentVid });
                 }
-            });
+            }
+        }
 
-            function reportDuration() {
-                const d = player.duration;
-                if (d && isFinite(d) && d > 0 && !isFatalError) {
+        function onPlayerError(event) {
+            postToParent({
+                type: 'error',
+                videoId: currentVid,
+                message: 'YouTube Error Code: ' + event.data
+            });
+        }
+
+        function reportDuration() {
+            if (!player || typeof player.getDuration !== 'function') return false;
+            try {
+                const d = player.getDuration();
+                if (d && isFinite(d) && d > 0) {
                     postToParent({ type: 'duration', videoId: currentVid, duration: d });
                     return true;
                 }
-                return false;
-            }
+            } catch (e) {}
+            return false;
+        }
 
-            let durRetry = 0;
-            let reportInterval = null;
-            function scheduleReportDuration() {
-                durRetry = 0;
-                if (reportInterval) clearInterval(reportInterval);
-                reportInterval = setInterval(function () {
-                    if (reportDuration()) {
-                        clearInterval(reportInterval);
-                        reportInterval = null;
-                    } else {
-                        durRetry++;
-                        if (durRetry > 30) {
-                            clearInterval(reportInterval);
-                            reportInterval = null;
-                        }
-                    }
-                }, 1000);
-            }
-
-            player.addEventListener('durationchange', reportDuration);
-            player.addEventListener('duration-change', reportDuration);
-            player.addEventListener('loadedmetadata', reportDuration);
-            player.addEventListener('can-play', scheduleReportDuration);
-
-            // Verificador de auto-play / fin de video
-            setInterval(function () {
-                if (endedThisVideo || isFatalError || errorOverlay.classList.contains('active')) {
-                    lastExpectedAutoplay = false;
-                    return;
+        // Sondeo para asegurar reporte de duración preciso
+        function scheduleReportDuration() {
+            if (durationPollInterval) clearInterval(durationPollInterval);
+            let retries = 0;
+            durationPollInterval = setInterval(() => {
+                if (reportDuration() || retries > 25) {
+                    clearInterval(durationPollInterval);
+                    durationPollInterval = null;
                 }
+                retries++;
+            }, 800);
+        }
 
-                try {
-                    if (player.duration && player.currentTime >= player.duration - 1) {
-                        endedThisVideo = true;
-                        if (!endedReported) {
-                            endedReported = true;
-                            postToParent({ type: 'ended', videoId: currentVid });
-                        }
-                        lastExpectedAutoplay = false;
-                        return;
-                    }
-                } catch (e) {}
+        // Listener de comandos postMessage ('voice-eva')
+        window.addEventListener('message', function (ev) {
+            const data = ev.data;
+            if (!data || typeof data !== 'object' || data.source !== 'voice-eva') return;
 
-                if (lastExpectedAutoplay && player.paused) {
-                    safePlay();
-                }
-            }, 2500);
+            try {
+                switch (data.type) {
+                    case 'load':
+                        if (data.videoId) {
+                            currentVid = data.videoId;
+                            endedReported = false;
+                            const startAt = Math.max(0, Number(data.time) || 0);
 
-            // Mensajes recibidos desde el frame padre
-            window.addEventListener('message', function (ev) {
-                const data = ev.data;
-                if (!data || typeof data !== 'object' || data.source !== 'voice-eva') return;
-                try {
-                    switch (data.type) {
-                        case 'load':
-                            if (data.videoId && data.videoId !== currentVid) {
-                                hideOverlay();
-                                showCurtain();
-                                clearHangWatchdog();
-                                currentVid = data.videoId;
-                                hasNextInQueue = !!data.hasNext;
-                                endedThisVideo = false;
-                                endedReported = false;
-                                player.src = 'youtube/' + data.videoId;
-                                startHangWatchdog();
-
+                            if (player && typeof player.loadVideoById === 'function') {
                                 if (data.autoplay) {
-                                    player.setAttribute('autoplay', '');
-                                    lastExpectedAutoplay = true;
+                                    player.loadVideoById({
+                                        videoId: data.videoId,
+                                        startSeconds: startAt
+                                    });
                                 } else {
-                                    player.removeAttribute('autoplay');
-                                    lastExpectedAutoplay = false;
+                                    player.cueVideoById({
+                                        videoId: data.videoId,
+                                        startSeconds: startAt
+                                    });
                                 }
-
-                                const loadStart = Math.max(0, Number(data.time) || 0);
-                                const onCanPlay = function () {
-                                    player.removeEventListener('can-play', onCanPlay);
-                                    if (loadStart > 0) {
-                                        try { player.currentTime = loadStart; } catch (e) {}
-                                    }
-                                    if (lastExpectedAutoplay) {
-                                        safePlay();
-                                    }
-                                };
-                                player.addEventListener('can-play', onCanPlay);
                                 scheduleReportDuration();
                             }
-                            break;
+                        }
+                        break;
 
-                        case 'queue_state':
-                            hasNextInQueue = !!data.hasNext;
-                            if (isFatalError && hasNextInQueue && !countdownTimer) {
-                                startCountdown();
-                            } else if (isFatalError && !hasNextInQueue && countdownTimer) {
-                                clearInterval(countdownTimer);
-                                countdownTimer = null;
-                                countdownBox.classList.remove('visible');
-                            }
-                            break;
+                    case 'play':
+                        if (player && typeof player.playVideo === 'function') {
+                            player.playVideo();
+                        }
+                        break;
 
-                        case 'play':
-                            if (!isFatalError) {
-                                lastExpectedAutoplay = true;
-                                safePlay();
-                            }
-                            break;
-                        case 'pause':
-                            if (!isFatalError) {
-                                lastExpectedAutoplay = false;
-                                try { player.pause(); } catch (e) {}
-                            }
-                            break;
-                        case 'seek':
-                            if (!isFatalError) {
-                                player.currentTime = Math.max(0, Number(data.time) || 0);
-                            }
-                            break;
-                        case 'stop':
-                            hideOverlay();
-                            showCurtain();
-                            clearHangWatchdog();
-                            lastExpectedAutoplay = false;
-                            try { player.pause(); } catch (e) {}
-                            player.currentTime = 0;
-                            break;
-                        case 'mute':
-                            player.muted = true;
-                            break;
-                        case 'unmute':
-                            player.muted = false;
-                            break;
-                        case 'setVolume':
-                            player.volume = Math.max(0, Math.min(1, (Number(data.volume) || 0) / 100));
-                            break;
-                    }
-                } catch (e) {}
-            });
-        }
+                    case 'pause':
+                        if (player && typeof player.pauseVideo === 'function') {
+                            player.pauseVideo();
+                        }
+                        break;
+
+                    case 'seek':
+                        if (player && typeof player.seekTo === 'function') {
+                            player.seekTo(Math.max(0, Number(data.time) || 0), true);
+                        }
+                        break;
+
+                    case 'stop':
+                        if (player && typeof player.stopVideo === 'function') {
+                            player.stopVideo();
+                        }
+                        break;
+
+                    case 'mute':
+                        if (player && typeof player.mute === 'function') {
+                            player.mute();
+                        }
+                        break;
+
+                    case 'unmute':
+                        if (player && typeof player.unMute === 'function') {
+                            player.unMute();
+                        }
+                        break;
+
+                    case 'setVolume':
+                        if (player && typeof player.setVolume === 'function') {
+                            const vol = Math.max(0, Math.min(100, Number(data.volume) || 0));
+                            player.setVolume(vol);
+                        }
+                        break;
+                }
+            } catch (err) {}
+        });
     </script>
 </body>
 </html>
