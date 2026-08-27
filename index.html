@@ -168,6 +168,7 @@
         // Estados
         let hasActiveError = false;
         let isRealPlaybackActive = false;
+        let hasEverPlayed = false;
         let currentVid = videoId || null;
         let lastExpectedAutoplay = autoplay === '1';
         let endedReported = false;
@@ -217,20 +218,21 @@
             postToParent({ type: 'error', videoId: currentVid, code: code, message: msg });
         }
 
-        function triggerPlaybackStarted() {
-            if (hasActiveError || isRealPlaybackActive) return;
-            isRealPlaybackActive = true;
-            
-            // Destapar el video y ocultar spinner
-            videoCover.classList.add('hidden');
-            hideSpinner();
-            errorView.classList.remove('active');
-
-            if (!reportedReady) {
-                reportedReady = true;
-                postToParent({ type: 'ready' });
-            }
+function triggerPlaybackStarted() {
+        if (hasActiveError || isRealPlaybackActive) return;
+        isRealPlaybackActive = true;
+        hasEverPlayed = true;
+        
+        // Destapar el video y ocultar spinner
+        videoCover.classList.add('hidden');
+        hideSpinner();
+        errorView.classList.remove('active');
+        
+        if (!reportedReady) {
+            reportedReady = true;
+            postToParent({ type: 'ready' });
         }
+    }
 
         function postToParent(m) {
             try { window.parent.postMessage(Object.assign({ source: 'x-player' }, m), '*'); } catch (e) {}
