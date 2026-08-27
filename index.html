@@ -47,23 +47,25 @@
             --media-font-family: inherit;
         }
 
-        /* --- Spinner Minimalista Continuo --- */
+        /* --- Spinner con bloqueo estricto --- */
         .minimal-spinner {
             position: absolute;
             z-index: 50;
-            width: 30px;
-            height: 30px;
-            border: 2px solid rgba(255, 255, 255, 0.15);
+            width: 32px;
+            height: 32px;
+            border: 2.5px solid rgba(255, 255, 255, 0.12);
             border-top-color: #ffffff;
             border-radius: 50%;
             animation: spin 0.75s linear infinite;
             pointer-events: none;
+            display: none;
             opacity: 0;
-            transition: opacity 0.15s ease;
+            transition: opacity 0.2s ease;
         }
 
-        .minimal-spinner.visible {
-            opacity: 1;
+        .minimal-spinner.active {
+            display: block !important;
+            opacity: 1 !important;
         }
 
         @keyframes spin {
@@ -84,12 +86,12 @@
             text-align: center;
             opacity: 0;
             pointer-events: none;
-            transition: opacity 0.15s ease;
+            transition: opacity 0.2s ease;
         }
 
-        .minimal-error.visible {
-            opacity: 1;
-            pointer-events: auto;
+        .minimal-error.active {
+            opacity: 1 !important;
+            pointer-events: auto !important;
         }
 
         .error-tag {
@@ -128,7 +130,7 @@
 <body>
     <div id="playerHost">
         <!-- Spinner -->
-        <div id="loadingSpinner" class="minimal-spinner visible"></div>
+        <div id="loadingSpinner" class="minimal-spinner active"></div>
 
         <!-- Pantalla de Error -->
         <div id="errorView" class="minimal-error">
@@ -137,7 +139,6 @@
             <a id="errAction" class="error-link" href="#" target="_blank" rel="noopener noreferrer" style="display: none;">Ver en YouTube</a>
         </div>
 
-        <!-- Reproductor -->
         <media-player id="rmExternalPlayer" class="vds-player" load="eager" view-type="video" stream-type="on-demand" log-level="silent" crossorigin="" playsinline="" data-media-player="" tabindex="0" role="region" aria-label="Video Player" poster="data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7">
             <media-provider keep-alive="" data-media-provider="">
                 <iframe id="ytIframe" tabindex="-1" data-no-controls="" class="vds-youtube" aria-hidden="true" frameborder="0" allow="autoplay; fullscreen; encrypted-media; picture-in-picture; accelerometer; gyroscope"></iframe>
@@ -159,8 +160,9 @@
         const errText = document.getElementById('errText');
         const errAction = document.getElementById('errAction');
 
-        let isFatalError = false;
-        let isPlayingReal = false;
+        // Estados del reproductor
+        let hasActiveError = false;
+        let isRealPlaybackActive = false;
         let currentVid = videoId || null;
         let lastExpectedAutoplay = autoplay === '1';
         let endedReported = false;
@@ -174,52 +176,59 @@
             5: 'Error de compatibilidad con el reproductor.'
         };
 
-        // Gestor de estados de UI sin huecos ni parpadeos
-        function setUIState(state, code = null) {
-            if (state === 'loading') {
-                isFatalError = false;
-                isPlayingReal = false;
-                errorView.classList.remove('visible');
-                spinner.classList.add('visible');
-            } else if (state === 'playing') {
-                if (isFatalError) return;
-                isPlayingReal = true;
-                errorView.classList.remove('visible');
-                spinner.classList.remove('visible');
-            } else if (state === 'buffering') {
-                if (!isFatalError && !isPlayingReal) {
-                    spinner.classList.add('visible');
-                }
-            } else if (state === 'error') {
-                isFatalError = true;
-                isPlayingReal = false;
-                lastExpectedAutoplay = false;
+        function showSpinner() {
+            if (!hasActiveError && !isRealPlaybackActive) {
+                spinner.classList.add('active');
+            }
+        }
 
-                const num = Number(code);
-                const msg = (!isNaN(num) && ERRORS_MAP[num]) ? ERRORS_MAP[num] : String(code || 'Error al reproducir el contenido.');
+        function hideSpinner() {
+            spinner.classList.remove('active');
+        }
 
-                errCode.textContent = !isNaN(num) ? `ERROR ${num}` : 'ERROR DE REPRODUCCIÓN';
-                errText.textContent = msg;
+        function triggerError(code) {
+            if (hasActiveError) return;
+            hasActiveError = true;
+            isRealPlaybackActive = false;
+            lastExpectedAutoplay = false;
 
-                if (currentVid && (num === 150 || num === 101 || num === 5)) {
-                    errAction.href = 'https://www.youtube.com/watch?v=' + currentVid;
-                    errAction.style.display = 'inline-block';
-                } else {
-                    errAction.style.display = 'none';
-                }
+            // Apagar spinner e iluminar error al mismo instante
+            hideSpinner();
 
-                // Cambio simultáneo: se oculta spinner y se muestra el error en el mismo fotograma
-                spinner.classList.remove('visible');
-                errorView.classList.add('visible');
+            const num = Number(code);
+            const msg = (!isNaN(num) && ERRORS_MAP[num]) ? ERRORS_MAP[num] : String(code || 'Error al reproducir el contenido.');
 
-                // Detener el iframe para apagar scripts de fondo
-                try {
-                    if (player) player.src = '';
-                    if (ytIframe) ytIframe.src = 'about:blank';
-                } catch (e) {}
+            errCode.textContent = !isNaN(num) ? `ERROR ${num}` : 'ERROR DE REPRODUCCIÓN';
+            errText.textContent = msg;
 
-                console.error(`[Player Error] Code: ${code} | Video: ${currentVid}`);
-                postToParent({ type: 'error', videoId: currentVid, code: code, message: msg });
+            if (currentVid && (num === 150 || num === 101 || num === 5)) {
+                errAction.href = 'https://www.youtube.com/watch?v=' + currentVid;
+                errAction.style.display = 'inline-block';
+            } else {
+                errAction.style.display = 'none';
+            }
+
+            errorView.classList.add('active');
+
+            // Detener el iframe para cortar scripts de YouTube
+            try {
+                if (player) player.src = '';
+                if (ytIframe) ytIframe.src = 'about:blank';
+            } catch (e) {}
+
+            console.error(`[Player Error] Code: ${code} | Video: ${currentVid}`);
+            postToParent({ type: 'error', videoId: currentVid, code: code, message: msg });
+        }
+
+        function triggerPlaybackStarted() {
+            if (hasActiveError) return;
+            isRealPlaybackActive = true;
+            hideSpinner();
+            errorView.classList.remove('active');
+
+            if (!reportedReady) {
+                reportedReady = true;
+                postToParent({ type: 'ready' });
             }
         }
 
@@ -228,7 +237,7 @@
         }
 
         function safePlay() {
-            if (!player || isFatalError) return;
+            if (!player || hasActiveError) return;
             try {
                 const p = player.play();
                 if (p && typeof p.catch === 'function') {
@@ -241,46 +250,39 @@
             if (autoplay !== '1') player.removeAttribute('autoplay');
 
             if (videoId) {
-                setUIState('loading');
+                showSpinner();
                 player.src = 'youtube/' + videoId;
                 if (autoplay === '1') {
                     player.setAttribute('autoplay', '');
                     lastExpectedAutoplay = true;
                 }
             } else {
-                spinner.classList.remove('visible');
+                hideSpinner();
             }
 
-            function markReady() {
-                if (reportedReady || isFatalError) return;
-                reportedReady = true;
-                postToParent({ type: 'ready' });
-            }
-
-            // El spinner solo se retira cuando el video REALMENTE está reproduciendo fotogramas
+            // SOLO se apaga el spinner cuando la reproducción es REAL
             player.addEventListener('playing', function() {
-                setUIState('playing');
-                markReady();
+                triggerPlaybackStarted();
             });
 
-            player.addEventListener('can-play', function() {
-                markReady();
-                // Si no tiene autoplay y ya puede reproducirse, apagamos el spinner para ver el frame
-                if (!lastExpectedAutoplay) {
-                    setUIState('playing');
+            player.addEventListener('time-update', function() {
+                if (!isRealPlaybackActive && player.currentTime > 0) {
+                    triggerPlaybackStarted();
                 }
             });
 
+            // Si entra en buffer o espera, mantener spinner activo
             player.addEventListener('waiting', function() {
-                if (!isPlayingReal) {
-                    setUIState('buffering');
+                if (!hasActiveError) {
+                    isRealPlaybackActive = false;
+                    showSpinner();
                 }
             });
 
             player.addEventListener('error', function(event) {
                 const detail = event && event.detail;
                 const err = (detail && (detail.code || detail.message || detail.error)) || 'Playback Error';
-                setUIState('error', err);
+                triggerError(err);
             });
 
             player.addEventListener('ended', function () {
@@ -290,21 +292,21 @@
                 }
             });
 
-            // Reintento limpio de autoplay
+            // Reintento seguro de autoplay
             setInterval(function () {
-                if (lastExpectedAutoplay && !isFatalError && player.paused) {
+                if (lastExpectedAutoplay && !hasActiveError && !isRealPlaybackActive && player.paused) {
                     safePlay();
                 }
-            }, 2500);
+            }, 2000);
 
-            // Escuchar mensajes
+            // Escucha de mensajes
             window.addEventListener('message', function (ev) {
-                // Interceptar error directo de YouTube
+                // Interceptar error directo de YouTube iframe
                 if (typeof ev.data === 'string' && ev.data.includes('onError')) {
                     try {
                         const ytData = JSON.parse(ev.data);
                         if (ytData.event === 'onError' && ytData.info) {
-                            setUIState('error', ytData.info);
+                            triggerError(ytData.info);
                         }
                     } catch (e) {}
                 }
@@ -315,10 +317,17 @@
                     switch (data.type) {
                         case 'load':
                             if (data.videoId) {
+                                hasActiveError = false;
+                                isRealPlaybackActive = false;
+                                errorView.classList.remove('active');
+                                errAction.style.display = 'none';
+                                
                                 currentVid = data.videoId;
                                 endedReported = false;
                                 reportedReady = false;
-                                setUIState('loading');
+                                
+                                // Asegurar que el spinner esté activo desde el primer instante de carga
+                                showSpinner();
                                 player.src = 'youtube/' + data.videoId;
 
                                 if (data.autoplay) {
@@ -331,7 +340,7 @@
 
                                 const onCanPlay = function () {
                                     player.removeEventListener('can-play', onCanPlay);
-                                    if (lastExpectedAutoplay && !isFatalError) {
+                                    if (lastExpectedAutoplay && !hasActiveError) {
                                         safePlay();
                                     }
                                 };
@@ -339,7 +348,7 @@
                             }
                             break;
                         case 'play':
-                            if (!isFatalError) {
+                            if (!hasActiveError) {
                                 lastExpectedAutoplay = true;
                                 safePlay();
                             }
