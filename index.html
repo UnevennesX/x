@@ -77,6 +77,23 @@
         const autoplay = params.get('autoplay');
         const player = document.getElementById('rmExternalPlayer');
 
+        // Mapeo explicativo de errores comunes de YouTube
+        const YT_ERRORS = {
+            2: 'Error 2: El parámetro contiene un valor no válido (ID de video incorrecto o mal formado).',
+            5: 'Error 5: El contenido solicitado no se puede reproducir en un reproductor HTML5.',
+            100: 'Error 100: El video no fue encontrado (ha sido eliminado o marcado como privado).',
+            101: 'Error 101: El propietario del video no permite que se reproduzca en reproductores insertados/embebidos.',
+            150: 'Error 150: El propietario del video no permite la reproducción en reproductores insertados/embebidos (Restricción de inserción).'
+        };
+
+        function explainError(codeOrMsg) {
+            const num = Number(codeOrMsg);
+            if (!isNaN(num) && YT_ERRORS[num]) {
+                return YT_ERRORS[num];
+            }
+            return String(codeOrMsg || 'Error desconocido de reproducción');
+        }
+
         function postToParent(m) {
             try { window.parent.postMessage(Object.assign({ source: 'x-player' }, m), '*'); } catch (e) {}
         }
@@ -86,9 +103,13 @@
             try {
                 const playPromise = player.play();
                 if (playPromise !== undefined && typeof playPromise.catch === 'function') {
-                    playPromise.catch(function () {});
+                    playPromise.catch(function (err) {
+                        console.warn('[Vidstack/Player] Intento de reproducción automática bloqueado o fallido:', err.name, err.message);
+                    });
                 }
-            } catch (e) {}
+            } catch (e) {
+                console.warn('[Vidstack/Player] Excepción en safePlay:', e);
+            }
         }
 
         if (player) {
@@ -116,10 +137,29 @@
             player.addEventListener('playing', markReady);
             setTimeout(markReady, 2500);
 
+            // Manejador centralizado de errores
+            function handlePlayerError(errorInfo, rawEvent) {
+                const detailedMsg = explainError(errorInfo);
+                
+                console.error('%c[Vidstack Video Error]', 'color: #ff3333; font-weight: bold;', {
+                    videoId: currentVid,
+                    error: errorInfo,
+                    explanation: detailedMsg,
+                    rawEvent: rawEvent
+                });
+
+                postToParent({
+                    type: 'error',
+                    videoId: currentVid,
+                    code: errorInfo,
+                    message: detailedMsg
+                });
+            }
+
             player.addEventListener('error', function (event) {
                 const detail = event && event.detail;
-                const message = detail && (detail.message || detail.error || detail.code);
-                postToParent({ type: 'error', videoId: currentVid, message: String(message || 'Video unavailable') });
+                const errorVal = (detail && (detail.code || detail.message || detail.error)) || (event && event.message) || 'Playback Error';
+                handlePlayerError(errorVal, event);
             });
 
             player.addEventListener('ended', function () {
@@ -135,7 +175,18 @@
                 }
             }, 2500);
 
+            // Escuchar mensajes (tanto de la app padre como posibles eventos directos de YouTube)
             window.addEventListener('message', function (ev) {
+                // Capturar si el iframe de YouTube envía un error directo
+                if (typeof ev.data === 'string' && ev.data.includes('onError')) {
+                    try {
+                        const ytData = JSON.parse(ev.data);
+                        if (ytData.event === 'onError' && ytData.info) {
+                            handlePlayerError(ytData.info, ytData);
+                        }
+                    } catch (e) {}
+                }
+
                 const data = ev.data;
                 if (!data || typeof data !== 'object' || data.source !== 'voice-eva') return;
                 try {
