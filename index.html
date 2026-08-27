@@ -1,391 +1,617 @@
 <!DOCTYPE html>
 <html lang="es">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Reproductor de Música YouTube</title>
-  <style>
-    :root {
-      --bg: #0f172a;
-      --card-bg: #1e293b;
-      --primary: #6366f1;
-      --text: #f8fafc;
-      --text-muted: #94a3b8;
-    }
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="referrer" content="no-referrer-when-downgrade">
+    <title>Vidstack Core Player</title>
 
-    * {
-      box-sizing: border-box;
-      margin: 0;
-      padding: 0;
-      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-    }
+    <!-- Vidstack Core Web Components (https://vidstack.io/docs/wc/player/components/core/player/) -->
+    <link rel="stylesheet" href="https://cdn.vidstack.io/player/theme.css">
+    <link rel="stylesheet" href="https://cdn.vidstack.io/player/video.css">
+    <script type="module" src="https://cdn.vidstack.io/player"></script>
 
-    body {
-      background-color: var(--bg);
-      color: var(--text);
-      display: flex;
-      justify-content: center;
-      align-items: center;
-      min-height: 100vh;
-      padding: 20px;
-    }
+    <!-- Preconexión sin rastreo -->
+    <link rel="preconnect" href="https://www.youtube-nocookie.com" crossorigin="true">
+    <link rel="preconnect" href="https://i.ytimg.com" crossorigin="true">
 
-    .player-card {
-      background: var(--card-bg);
-      width: 100%;
-      max-width: 400px;
-      padding: 25px;
-      border-radius: 20px;
-      box-shadow: 0 10px 25px rgba(0, 0, 0, 0.4);
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      gap: 15px;
-    }
+    <style>
+        * {
+            box-sizing: border-box;
+            user-select: none;
+            margin: 0;
+            padding: 0;
+        }
 
-    .input-group {
-      width: 100%;
-      display: flex;
-      gap: 8px;
-    }
+        html, body {
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+            background-color: #000000;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            color: #ffffff;
+            -webkit-font-smoothing: antialiased;
+        }
 
-    .input-group input {
-      flex: 1;
-      padding: 10px 14px;
-      border-radius: 10px;
-      border: 1px solid #334155;
-      background: #0f172a;
-      color: var(--text);
-      outline: none;
-      font-size: 14px;
-    }
+        #playerHost {
+            width: 100%;
+            height: 100%;
+            position: relative;
+            background-color: #000000;
+            overflow: hidden;
+        }
 
-    .input-group button {
-      padding: 10px 15px;
-      background: var(--primary);
-      color: white;
-      border: none;
-      border-radius: 10px;
-      cursor: pointer;
-      font-weight: bold;
-      transition: background 0.2s;
-    }
+        /* Reproductor Vidstack Core (Headless) */
+        media-player {
+            width: 100% !important;
+            height: 100% !important;
+            position: absolute;
+            inset: 0;
+            background-color: #000000;
+            opacity: 0;
+            visibility: hidden;
+            transition: opacity 0.2s ease;
+        }
 
-    .input-group button:hover {
-      background: #4f46e5;
-    }
+        media-player.vds-visible {
+            opacity: 1;
+            visibility: visible;
+        }
 
-    .thumbnail-container {
-      width: 100%;
-      aspect-ratio: 16/9;
-      border-radius: 12px;
-      overflow: hidden;
-      background: #000;
-      position: relative;
-      display: flex;
-      justify-content: center;
-      align-items: center;
-    }
+        media-player media-provider,
+        media-player iframe,
+        media-player video {
+            width: 100% !important;
+            height: 100% !important;
+            border: none;
+            object-fit: contain;
+            display: block;
+        }
 
-    .thumbnail-container img {
-      width: 100%;
-      height: 100%;
-      object-fit: cover;
-    }
+        /* Cortina Protectora de Carga */
+        .rm-curtain {
+            position: absolute;
+            inset: 0;
+            background-color: #000000;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 50;
+            opacity: 1;
+            visibility: visible;
+            transition: opacity 0.2s ease, visibility 0.2s ease;
+        }
 
-    /* Iframe de YouTube minimizado o visible según prefieras */
-    #youtube-player {
-      position: absolute;
-      top: 0;
-      left: 0;
-      width: 100%;
-      height: 100%;
-      opacity: 0; /* Oculto visualmente pero activo */
-      pointer-events: none;
-    }
+        .rm-curtain.hidden {
+            opacity: 0;
+            visibility: hidden;
+            pointer-events: none;
+        }
 
-    .track-info {
-      text-align: center;
-      width: 100%;
-    }
+        .rm-spinner {
+            width: 32px;
+            height: 32px;
+            border: 2px solid rgba(255, 255, 255, 0.15);
+            border-top-color: #ffffff;
+            border-radius: 50%;
+            animation: spin 0.7s linear infinite;
+        }
 
-    .track-title {
-      font-size: 16px;
-      font-weight: 600;
-      white-space: nowrap;
-      overflow: hidden;
-      text-overflow: ellipsis;
-    }
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
 
-    .progress-container {
-      width: 100%;
-      display: flex;
-      flex-direction: column;
-      gap: 5px;
-    }
+        /* Estado en Espera */
+        .rm-idle-layer {
+            position: absolute;
+            inset: 0;
+            background-color: #000000;
+            display: none;
+            align-items: center;
+            justify-content: center;
+            z-index: 60;
+            color: #555555;
+            font-size: 0.88rem;
+        }
 
-    .progress-bar {
-      width: 100%;
-      -webkit-appearance: none;
-      height: 6px;
-      border-radius: 3px;
-      background: #334155;
-      outline: none;
-      cursor: pointer;
-    }
+        .rm-idle-layer.active {
+            display: flex;
+        }
 
-    .progress-bar::-webkit-slider-thumb {
-      -webkit-appearance: none;
-      width: 14px;
-      height: 14px;
-      border-radius: 50%;
-      background: var(--primary);
-      cursor: pointer;
-    }
+        /* Capa de Error Minimalista */
+        .rm-error-layer {
+            position: absolute;
+            inset: 0;
+            background-color: #0a0a0a;
+            display: none;
+            align-items: center;
+            justify-content: center;
+            padding: 24px;
+            z-index: 100;
+        }
 
-    .time-info {
-      display: flex;
-      justify-content: space-between;
-      font-size: 12px;
-      color: var(--text-muted);
-    }
+        .rm-error-layer.active {
+            display: flex;
+        }
 
-    .controls {
-      display: flex;
-      align-items: center;
-      gap: 20px;
-    }
+        .rm-error-box {
+            max-width: 420px;
+            width: 100%;
+            text-align: center;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 12px;
+        }
 
-    .btn-control {
-      background: none;
-      border: none;
-      color: var(--text);
-      font-size: 20px;
-      cursor: pointer;
-      transition: transform 0.1s;
-    }
+        .rm-error-title {
+            font-size: 1.1rem;
+            font-weight: 600;
+            color: #ffffff;
+        }
 
-    .btn-control:active {
-      transform: scale(0.9);
-    }
+        .rm-error-reason {
+            font-size: 0.88rem;
+            line-height: 1.45;
+            color: #888888;
+            word-break: break-word;
+        }
 
-    .btn-play {
-      background: var(--primary);
-      width: 50px;
-      height: 50px;
-      border-radius: 50%;
-      display: flex;
-      justify-content: center;
-      align-items: center;
-      font-size: 22px;
-    }
+        .rm-error-code {
+            font-size: 0.75rem;
+            font-family: monospace;
+            color: #555555;
+            margin-top: 2px;
+        }
 
-    .volume-container {
-      width: 100%;
-      display: flex;
-      align-items: center;
-      gap: 10px;
-      font-size: 14px;
-      color: var(--text-muted);
-    }
+        .rm-countdown-msg {
+            display: none;
+            font-size: 0.82rem;
+            color: #777777;
+            margin-top: 6px;
+        }
 
-    .volume-bar {
-      flex: 1;
-      -webkit-appearance: none;
-      height: 4px;
-      border-radius: 2px;
-      background: #334155;
-      cursor: pointer;
-    }
+        .rm-countdown-msg.visible {
+            display: block;
+        }
 
-    .volume-bar::-webkit-slider-thumb {
-      -webkit-appearance: none;
-      width: 12px;
-      height: 12px;
-      border-radius: 50%;
-      background: var(--text-muted);
-    }
-  </style>
+        .rm-countdown-sec {
+            font-weight: 600;
+            color: #ffffff;
+        }
+
+        .rm-btn-skip {
+            margin-top: 10px;
+            padding: 8px 18px;
+            background: #1c1c1c;
+            color: #eeeeee;
+            border: 1px solid #2e2e2e;
+            border-radius: 6px;
+            font-size: 0.82rem;
+            font-weight: 500;
+            cursor: pointer;
+            transition: background 0.15s ease;
+        }
+
+        .rm-btn-skip:hover {
+            background: #2a2a2a;
+            color: #ffffff;
+        }
+    </style>
 </head>
 <body>
+    <div id="playerHost">
+        <!-- Cortina inicial -->
+        <div id="rmCurtain" class="rm-curtain">
+            <div class="rm-spinner"></div>
+        </div>
 
-  <div class="player-card">
-    <!-- Input para pegar el enlace o ID -->
-    <div class="input-group">
-      <input type="text" id="videoUrlInput" placeholder="Pega el enlace o ID de YouTube...">
-      <button id="loadBtn">Cargar</button>
+        <!-- Capa sin video cargado -->
+        <div id="rmIdleOverlay" class="rm-idle-layer">
+            <span>En espera de video...</span>
+        </div>
+
+        <!-- Componente Oficial Core de Vidstack (Headless) -->
+        <media-player id="rmExternalPlayer" playsinline crossorigin>
+            <media-provider></media-provider>
+        </media-player>
+
+        <!-- Capa de Error -->
+        <div id="rmErrorOverlay" class="rm-error-layer">
+            <div class="rm-error-box">
+                <div id="rmErrorTitle" class="rm-error-title">No se pudo reproducir</div>
+                <div id="rmErrorReason" class="rm-error-reason">Ocurrió un error al cargar el video.</div>
+                <div id="rmErrorCode" class="rm-error-code"></div>
+                <div id="rmCountdownBox" class="rm-countdown-msg">
+                    Siguiente video en <span id="rmCountdownSec" class="rm-countdown-sec">5</span>s
+                </div>
+                <button id="rmBtnSkip" class="rm-btn-skip" style="display: none;">Saltar video</button>
+            </div>
+        </div>
     </div>
 
-    <!-- Contenedor del reproductor / portada -->
-    <div class="thumbnail-container">
-      <img id="trackThumb" src="https://images.unsplash.com/photo-1511671782779-c97d3d27a1d4?w=500" alt="Portada">
-      <div id="youtube-player"></div>
-    </div>
+    <script>
+        const urlParams = new URLSearchParams(window.location.search);
+        const initialVideoId = urlParams.get('v') || urlParams.get('videoId') || null;
+        const initialAutoplay = urlParams.get('autoplay') === '1';
+        const initialStartTime = Math.max(0, Number(urlParams.get('t') || urlParams.get('time')) || 0);
 
-    <!-- Título -->
-    <div class="track-info">
-      <p class="track-title" id="trackTitle">Sin reproducir</p>
-    </div>
+        const player = document.getElementById('rmExternalPlayer');
+        const curtain = document.getElementById('rmCurtain');
+        const idleOverlay = document.getElementById('rmIdleOverlay');
+        const errorOverlay = document.getElementById('rmErrorOverlay');
+        const errorTitle = document.getElementById('rmErrorTitle');
+        const errorReason = document.getElementById('rmErrorReason');
+        const errorCodeTag = document.getElementById('rmErrorCode');
+        const countdownBox = document.getElementById('rmCountdownBox');
+        const countdownSec = document.getElementById('rmCountdownSec');
+        const btnSkip = document.getElementById('rmBtnSkip');
 
-    <!-- Barra de progreso -->
-    <div class="progress-container">
-      <input type="range" class="progress-bar" id="progressBar" value="0" min="0" max="100">
-      <div class="time-info">
-        <span id="currentTime">0:00</span>
-        <span id="totalDuration">0:00</span>
-      </div>
-    </div>
+        let currentVid = null;
+        let isFatalError = false;
+        let hasNextInQueue = false;
+        let countdownTimer = null;
+        let watchdogTimer = null;
+        let reportedReady = false;
+        let endedThisVideo = false;
+        let endedReported = false;
+        let lastExpectedAutoplay = false;
 
-    <!-- Botones de Control -->
-    <div class="controls">
-      <button class="btn-control" id="prev10Btn">⏪ 10s</button>
-      <button class="btn-control btn-play" id="playBtn">▶</button>
-      <button class="btn-control" id="next10Btn">10s ⏩</button>
-    </div>
-
-    <!-- Volumen -->
-    <div class="volume-container">
-      <span>🔈</span>
-      <input type="range" class="volume-bar" id="volumeBar" value="100" min="0" max="100">
-      <span>🔊</span>
-    </div>
-  </div>
-
-  <!-- API de YouTube -->
-  <script src="https://www.youtube.com/iframe_api"></script>
-  <script>
-    let player;
-    let isPlaying = false;
-    let updateTimer;
-
-    // 1. Inicializar la API de YouTube
-    function onYouTubeIframeAPIReady() {
-      player = new YT.Player('youtube-player', {
-        height: '100%',
-        width: '100%',
-        videoId: 'dQw4w9WgXcQ', // Video inicial por defecto
-        playerVars: {
-          playsinline: 1,
-          controls: 0,
-          disablekb: 1,
-          fs: 0
-        },
-        events: {
-          'onReady': onPlayerReady,
-          'onStateChange': onPlayerStateChange
+        function extractYouTubeId(urlOrId) {
+            if (!urlOrId) return '';
+            const match = String(urlOrId).match(/(?:youtu\.be\/|youtube\.com\/(?:embed\/|v\/|watch\?v=|watch\?.+&v=))([\w-]{11})/);
+            if (match && match[1]) return match[1];
+            return String(urlOrId).trim();
         }
-      });
-    }
 
-    // 2. Extraer Video ID de cualquier formato de URL de YouTube
-    function extractVideoId(url) {
-      const regExp = /^.*(youtu.be\/|v\/|u\/\w\/|embed\/|watch\?v=|\&v=)([^#\&\?]*).*/;
-      const match = url.match(regExp);
-      return (match && match[2].length === 11) ? match[2] : (url.length === 11 ? url : null);
-    }
+        function getRealErrorMessage(code, rawMsg) {
+            if (rawMsg && typeof rawMsg === 'string' && rawMsg.trim().length > 0 && !rawMsg.includes('[object')) {
+                return {
+                    title: 'Error de reproducción',
+                    reason: rawMsg
+                };
+            }
 
-    // 3. Formatear segundos a MM:SS
-    function formatTime(seconds) {
-      const mins = Math.floor(seconds / 60);
-      const secs = Math.floor(seconds % 60);
-      return `${mins}:${secs < 10 ? '0' : ''}${secs}`;
-    }
-
-    function onPlayerReady(event) {
-      updateTrackInfo();
-    }
-
-    function onPlayerStateChange(event) {
-      const playBtn = document.getElementById('playBtn');
-      if (event.data === YT.PlayerState.PLAYING) {
-        isPlaying = true;
-        playBtn.textContent = '⏸';
-        startProgressTracker();
-        updateTrackInfo();
-      } else {
-        isPlaying = false;
-        playBtn.textContent = '▶';
-        clearInterval(updateTimer);
-      }
-    }
-
-    function updateTrackInfo() {
-      if (!player || !player.getVideoData) return;
-      const data = player.getVideoData();
-      if (data && data.title) {
-        document.getElementById('trackTitle').textContent = data.title;
-      }
-      if (data && data.video_id) {
-        document.getElementById('trackThumb').src = `https://img.youtube.com/vi/${data.video_id}/hqdefault.jpg`;
-      }
-      const duration = player.getDuration();
-      document.getElementById('totalDuration').textContent = formatTime(duration);
-    }
-
-    function startProgressTracker() {
-      clearInterval(updateTimer);
-      updateTimer = setInterval(() => {
-        if (player && isPlaying) {
-          const currentTime = player.getCurrentTime();
-          const duration = player.getDuration();
-          
-          document.getElementById('currentTime').textContent = formatTime(currentTime);
-          if (duration > 0) {
-            document.getElementById('progressBar').value = (currentTime / duration) * 100;
-          }
+            const numericCode = Number(code);
+            switch (numericCode) {
+                case 2:
+                    return {
+                        title: 'Parámetro no válido',
+                        reason: 'El ID del video contiene caracteres no válidos o es incorrecto.'
+                    };
+                case 5:
+                    return {
+                        title: 'Error de HTML5',
+                        reason: 'El contenido no se puede reproducir en el reproductor HTML5.'
+                    };
+                case 100:
+                    return {
+                        title: 'Video no encontrado',
+                        reason: 'El video no existe, ha sido eliminado o está marcado como privado.'
+                    };
+                case 101:
+                case 150:
+                    return {
+                        title: 'Inserción no permitida',
+                        reason: 'El propietario del video no permite reproducirlo fuera de YouTube.'
+                    };
+                case 153:
+                case 155:
+                    return {
+                        title: 'Restricción de región',
+                        reason: 'Este video no está disponible en este sitio o país.'
+                    };
+                case 408:
+                    return {
+                        title: 'Tiempo de espera agotado',
+                        reason: 'El video tardó demasiado en responder al conectar.'
+                    };
+                default:
+                    return {
+                        title: 'Error de reproducción',
+                        reason: 'No se pudo cargar el video debido a una falla inesperada del reproductor.'
+                    };
+            }
         }
-      }, 500);
-    }
 
-    // --- Controladores de eventos de la interfaz ---
+        function postToParent(msg) {
+            try {
+                if (window.parent && window.parent !== window) {
+                    window.parent.postMessage({ source: 'room-player', ...msg }, '*');
+                }
+            } catch (e) {}
+        }
 
-    // Play / Pausa
-    document.getElementById('playBtn').addEventListener('click', () => {
-      if (!player) return;
-      if (isPlaying) {
-        player.pauseVideo();
-      } else {
-        player.playVideo();
-      }
-    });
+        function showCurtain() {
+            idleOverlay.classList.remove('active');
+            curtain.classList.remove('hidden');
+            player.classList.remove('vds-visible');
+        }
 
-    // Cargar nuevo video desde el Input
-    document.getElementById('loadBtn').addEventListener('click', () => {
-      const urlInput = document.getElementById('videoUrlInput').value.trim();
-      const videoId = extractVideoId(urlInput);
+        function hideCurtain() {
+            curtain.classList.add('hidden');
+            player.classList.add('vds-visible');
+        }
 
-      if (videoId && player) {
-        player.loadVideoById(videoId);
-        document.getElementById('trackThumb').src = `https://img.youtube.com/vi/${videoId}/hqdefault.jpg`;
-      } else {
-        alert('Ingresa una URL o ID de video válido.');
-      }
-    });
+        function hideOverlay() {
+            errorOverlay.classList.remove('active');
+            countdownBox.classList.remove('visible');
+            btnSkip.style.display = 'none';
+            if (countdownTimer) {
+                clearInterval(countdownTimer);
+                countdownTimer = null;
+            }
+            isFatalError = false;
+        }
 
-    // Buscar en la barra de progreso (Seek)
-    document.getElementById('progressBar').addEventListener('input', (e) => {
-      if (!player) return;
-      const duration = player.getDuration();
-      const seekTo = (e.target.value / 100) * duration;
-      player.seekTo(seekTo, true);
-    });
+        function startHangWatchdog() {
+            clearHangWatchdog();
+            watchdogTimer = setTimeout(function () {
+                if (!reportedReady && !isFatalError) {
+                    triggerCustomError(408, 'Tiempo de espera agotado al conectar con el servidor.');
+                }
+            }, 14000);
+        }
 
-    // Retroceder / Avanzar 10 segundos
-    document.getElementById('prev10Btn').addEventListener('click', () => {
-      if (!player) return;
-      player.seekTo(player.getCurrentTime() - 10, true);
-    });
+        function clearHangWatchdog() {
+            if (watchdogTimer) {
+                clearTimeout(watchdogTimer);
+                watchdogTimer = null;
+            }
+        }
 
-    document.getElementById('next10Btn').addEventListener('click', () => {
-      if (!player) return;
-      player.seekTo(player.getCurrentTime() + 10, true);
-    });
+        function startCountdown() {
+            let left = 5;
+            countdownSec.textContent = left;
+            countdownBox.classList.add('visible');
+            btnSkip.style.display = 'inline-block';
 
-    // Control de volumen
-    document.getElementById('volumeBar').addEventListener('input', (e) => {
-      if (!player) return;
-      player.setVolume(e.target.value);
-    });
-  </script>
+            if (countdownTimer) clearInterval(countdownTimer);
+            countdownTimer = setInterval(function () {
+                left--;
+                if (left <= 0) {
+                    clearInterval(countdownTimer);
+                    countdownTimer = null;
+                    skipVideo();
+                } else {
+                    countdownSec.textContent = left;
+                }
+            }, 1000);
+        }
+
+        btnSkip.addEventListener('click', skipVideo);
+
+        function triggerCustomError(code, customMessage) {
+            clearHangWatchdog();
+            isFatalError = true;
+
+            player.classList.remove('vds-visible');
+            curtain.classList.add('hidden');
+
+            const errorInfo = getRealErrorMessage(code, customMessage);
+            errorTitle.textContent = errorInfo.title;
+            errorReason.textContent = errorInfo.reason;
+            errorCodeTag.textContent = code ? `Código: ${code}` : '';
+
+            errorOverlay.classList.add('active');
+
+            try { player.pause(); } catch (e) {}
+            postToParent({ type: 'error', code: Number(code) || 150, videoId: currentVid, message: errorInfo.reason });
+
+            if (hasNextInQueue) {
+                startCountdown();
+            } else {
+                if (countdownTimer) {
+                    clearInterval(countdownTimer);
+                    countdownTimer = null;
+                }
+                countdownBox.classList.remove('visible');
+            }
+        }
+
+        function skipVideo() {
+            hideOverlay();
+            clearHangWatchdog();
+            postToParent({ type: 'skip_fatal', videoId: currentVid });
+        }
+
+        // Configuración oficial de Vidstack para YouTube (Desactiva cookies y bloquea anuncios de terceros)
+        player.addEventListener('provider-change', function (ev) {
+            const provider = ev.detail;
+            if (provider && provider.type === 'youtube') {
+                provider.cookies = false; // Fuerza youtube-nocookie.com
+            }
+        });
+
+        // Intercepción inmediata de errores en el iframe
+        window.addEventListener('message', function (ev) {
+            try {
+                let data = ev.data;
+                if (typeof data === 'string') data = JSON.parse(data);
+                if (data) {
+                    if (data.event === 'onError' || [2, 5, 100, 101, 150, 153, 155].includes(Number(data.info))) {
+                        const code = data.info || (data.data && data.data.code) || 150;
+                        const msg = data.data && data.data.message ? data.data.message : null;
+                        triggerCustomError(code, msg);
+                    }
+                }
+            } catch (err) {}
+        });
+
+        function safePlay() {
+            if (!player || isFatalError) return;
+            try {
+                const p = player.play();
+                if (p && typeof p.catch === 'function') {
+                    p.catch(function () {
+                        player.muted = true;
+                        player.play().catch(function () {});
+                    });
+                }
+            } catch (e) {}
+        }
+
+        function loadVideo(vid, shouldAutoplay, seekTime) {
+            const cleanId = extractYouTubeId(vid);
+            if (!cleanId) {
+                hideCurtain();
+                idleOverlay.classList.add('active');
+                return;
+            }
+
+            hideOverlay();
+            showCurtain();
+            clearHangWatchdog();
+
+            currentVid = cleanId;
+            endedThisVideo = false;
+            endedReported = false;
+            reportedReady = false;
+            lastExpectedAutoplay = !!shouldAutoplay;
+
+            if (shouldAutoplay) {
+                player.setAttribute('autoplay', '');
+            } else {
+                player.removeAttribute('autoplay');
+            }
+
+            // Asignación de fuente en Vidstack
+            player.src = 'youtube/' + cleanId;
+            startHangWatchdog();
+
+            const startTimeSec = Math.max(0, Number(seekTime) || 0);
+            const onReady = function () {
+                player.removeEventListener('can-play', onReady);
+                if (startTimeSec > 0) {
+                    try { player.currentTime = startTimeSec; } catch (e) {}
+                }
+                if (lastExpectedAutoplay) {
+                    safePlay();
+                }
+            };
+            player.addEventListener('can-play', onReady);
+        }
+
+        function onPlaybackConfirmed() {
+            if (isFatalError) return;
+            clearHangWatchdog();
+            hideOverlay();
+            hideCurtain();
+
+            if (!reportedReady) {
+                reportedReady = true;
+                postToParent({ type: 'ready' });
+            }
+        }
+
+        player.addEventListener('can-play', onPlaybackConfirmed);
+        player.addEventListener('playing', onPlaybackConfirmed);
+        player.addEventListener('time-update', function () {
+            if (player.currentTime > 0.05 && !isFatalError) {
+                onPlaybackConfirmed();
+            }
+        });
+
+        player.addEventListener('error', function (ev) {
+            const detail = ev.detail || ev;
+            let ytCode = 150;
+            let errorMsg = null;
+
+            if (detail) {
+                if (typeof detail.code === 'number') ytCode = detail.code;
+                else if (typeof detail.data === 'number') ytCode = detail.data;
+                else if (detail.cause && typeof detail.cause.data === 'number') ytCode = detail.cause.data;
+
+                if (detail.message) errorMsg = detail.message;
+                else if (detail.cause && detail.cause.message) errorMsg = detail.cause.message;
+            }
+            triggerCustomError(ytCode, errorMsg);
+        });
+
+        player.addEventListener('ended', function () {
+            endedThisVideo = true;
+            if (!endedReported) {
+                endedReported = true;
+                postToParent({ type: 'ended', videoId: currentVid });
+            }
+        });
+
+        function reportDuration() {
+            const d = player.duration;
+            if (d && isFinite(d) && d > 0 && !isFatalError) {
+                postToParent({ type: 'duration', videoId: currentVid, duration: d });
+                return true;
+            }
+            return false;
+        }
+
+        player.addEventListener('duration-change', reportDuration);
+        player.addEventListener('loaded-metadata', reportDuration);
+
+        // Inicialización
+        if (initialVideoId) {
+            loadVideo(initialVideoId, initialAutoplay, initialStartTime);
+        } else {
+            hideCurtain();
+            idleOverlay.classList.add('active');
+        }
+
+        // Comunicación por postMessage
+        window.addEventListener('message', function (ev) {
+            const data = ev.data;
+            if (!data || typeof data !== 'object' || data.source !== 'voice-eva') return;
+
+            switch (data.type) {
+                case 'load':
+                    hasNextInQueue = !!data.hasNext;
+                    loadVideo(data.videoId, data.autoplay, data.time);
+                    break;
+                case 'queue_state':
+                    hasNextInQueue = !!data.hasNext;
+                    if (isFatalError && hasNextInQueue && !countdownTimer) {
+                        startCountdown();
+                    } else if (isFatalError && !hasNextInQueue && countdownTimer) {
+                        clearInterval(countdownTimer);
+                        countdownTimer = null;
+                        countdownBox.classList.remove('visible');
+                    }
+                    break;
+                case 'play':
+                    if (!isFatalError) {
+                        lastExpectedAutoplay = true;
+                        safePlay();
+                    }
+                    break;
+                case 'pause':
+                    if (!isFatalError) {
+                        lastExpectedAutoplay = false;
+                        try { player.pause(); } catch (e) {}
+                    }
+                    break;
+                case 'seek':
+                    if (!isFatalError) {
+                        player.currentTime = Math.max(0, Number(data.time) || 0);
+                    }
+                    break;
+                case 'stop':
+                    hideOverlay();
+                    showCurtain();
+                    clearHangWatchdog();
+                    lastExpectedAutoplay = false;
+                    try { player.pause(); } catch (e) {}
+                    player.currentTime = 0;
+                    break;
+                case 'mute':
+                    player.muted = true;
+                    break;
+                case 'unmute':
+                    player.muted = false;
+                    break;
+                case 'setVolume':
+                    player.volume = Math.max(0, Math.min(1, (Number(data.volume) || 0) / 100));
+                    break;
+            }
+        });
+    </script>
 </body>
 </html>
