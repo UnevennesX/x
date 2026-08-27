@@ -39,7 +39,7 @@
             background: #000000;
         }
 
-        /* El reproductor e iframe permanecen invisibles hasta que haya video real */
+        /* El reproductor permanece oculto hasta que el video empiece realmente */
         #rmExternalPlayer {
             width: 100% !important;
             height: 100% !important;
@@ -51,7 +51,6 @@
             --media-font-family: inherit;
         }
 
-        /* Solo se vuelve visible cuando realmente empieza a reproducir fotogramas */
         #rmExternalPlayer.is-playing {
             opacity: 1 !important;
             visibility: visible !important;
@@ -121,20 +120,6 @@
             line-height: 1.5;
             margin: 0;
         }
-
-        .error-link {
-            display: inline-block;
-            margin-top: 14px;
-            font-size: 12px;
-            color: #999;
-            text-decoration: underline;
-            text-underline-offset: 3px;
-            transition: color 0.15s ease;
-        }
-
-        .error-link:hover {
-            color: #fff;
-        }
     </style>
 </head>
 <body>
@@ -142,11 +127,10 @@
         <!-- Spinner -->
         <div id="loadingSpinner" class="minimal-spinner active"></div>
 
-        <!-- Pantalla de Error Propia -->
+        <!-- Pantalla de Error -->
         <div id="errorView" class="minimal-error">
             <span id="errCode" class="error-tag">ERROR</span>
             <p id="errText" class="error-msg">No se pudo reproducir este video.</p>
-            <a id="errAction" class="error-link" href="#" target="_blank" rel="noopener noreferrer" style="display: none;">Ver en YouTube</a>
         </div>
 
         <!-- Reproductor Vidstack -->
@@ -169,7 +153,6 @@
         const errorView = document.getElementById('errorView');
         const errCode = document.getElementById('errCode');
         const errText = document.getElementById('errText');
-        const errAction = document.getElementById('errAction');
 
         // Estados
         let hasActiveError = false;
@@ -203,7 +186,7 @@
             isRealPlaybackActive = false;
             lastExpectedAutoplay = false;
 
-            // Asegurar que el reproductor de YouTube esté totalmente oculto
+            // Asegurar que el iframe de YouTube permanezca oculto
             player.classList.remove('is-playing');
             hideSpinner();
 
@@ -213,17 +196,10 @@
             errCode.textContent = !isNaN(num) ? `ERROR ${num}` : 'ERROR DE REPRODUCCIÓN';
             errText.textContent = msg;
 
-            if (currentVid && (num === 150 || num === 101 || num === 5)) {
-                errAction.href = 'https://www.youtube.com/watch?v=' + currentVid;
-                errAction.style.display = 'inline-block';
-            } else {
-                errAction.style.display = 'none';
-            }
-
             // Mostrar nuestro diseño de error
             errorView.classList.add('active');
 
-            // Destruir el iframe inmediatamente para evitar que YouTube renderice nada más
+            // Destruir el iframe para cortar cualquier proceso o renderizado interno
             try {
                 if (player) player.src = '';
                 if (ytIframe) ytIframe.src = 'about:blank';
@@ -237,7 +213,7 @@
             if (hasActiveError) return;
             isRealPlaybackActive = true;
             
-            // Ahora sí hacemos visible el reproductor con el video real
+            // Mostrar reproductor cuando los fotogramas ya están activos
             player.classList.add('is-playing');
             hideSpinner();
             errorView.classList.remove('active');
@@ -276,7 +252,7 @@
                 hideSpinner();
             }
 
-            // Solo mostramos el video cuando ya está corriendo
+            // Solo mostramos el video cuando esté corriendo de verdad
             player.addEventListener('playing', function() {
                 triggerPlaybackStarted();
             });
@@ -307,14 +283,14 @@
                 }
             });
 
-            // Reintento limpio de reproducción
+            // Reintento de autoplay seguro
             setInterval(function () {
                 if (lastExpectedAutoplay && !hasActiveError && !isRealPlaybackActive && player.paused) {
                     safePlay();
                 }
             }, 2000);
 
-            // Escuchar eventos y mensajes
+            // Escucha de mensajes
             window.addEventListener('message', function (ev) {
                 // Captura inmediata de error 150 / 101 desde YouTube
                 if (typeof ev.data === 'string' && ev.data.includes('onError')) {
@@ -338,13 +314,12 @@
                                 // Ocultar reproductor y error previo
                                 player.classList.remove('is-playing');
                                 errorView.classList.remove('active');
-                                errAction.style.display = 'none';
                                 
                                 currentVid = data.videoId;
                                 endedReported = false;
                                 reportedReady = false;
                                 
-                                // Mostrar spinner continuo
+                                // Mantener spinner activo durante la carga
                                 showSpinner();
                                 player.src = 'youtube/' + data.videoId;
 
