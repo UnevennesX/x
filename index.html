@@ -3,12 +3,15 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Headless Player</title>
-    <style>
-        * {
-            box-sizing: border-box;
-        }
+    <title>Vidstack Player</title>
+    <script type="module" src="https://cdn.vidstack.io/player"></script>
+    
+    <link rel="preconnect" href="https://www.google.com" crossorigin="true">
+    <link rel="preconnect" href="https://i.ytimg.com" crossorigin="true">
+    <link rel="preconnect" href="https://googleads.g.doubleclick.net" crossorigin="true">
+    <link rel="preconnect" href="https://static.doubleclick.net" crossorigin="true">
 
+    <style>
         html, body {
             margin: 0;
             padding: 0;
@@ -18,33 +21,14 @@
             background-color: #000;
         }
 
-        /* Contenedor que recorta cualquier barra o título forzado por YouTube */
-        #playerHost {
-            position: absolute;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-            overflow: hidden;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            pointer-events: none; /* Desactiva interacción de mouse/touch para que YouTube no muestre overlays */
-            user-select: none;
-        }
-
-        /* Escalado sutil para ocultar los márgenes de 1-2px donde YouTube coloca títulos o marcas */
-        #ytWrapper {
-            width: 100%;
-            height: 100%;
-            transform: scale(1.05);
-            transform-origin: center center;
-        }
-
-        #ytWrapper iframe,
-        #ytPlayer {
+        #playerHost,
+        #rmExternalPlayer,
+        media-provider,
+        iframe {
             width: 100% !important;
             height: 100% !important;
+            max-width: none !important;
+            margin: 0 !important;
             border: 0 !important;
             display: block;
         }
@@ -52,193 +36,206 @@
 </head>
 <body>
     <div id="playerHost">
-        <div id="ytWrapper">
-            <div id="ytPlayer"></div>
-        </div>
+        <media-player id="rmExternalPlayer" class="vds-player" load="eager" view-type="video" stream-type="on-demand" log-level="warn" crossorigin="" playsinline="" data-media-player="" tabindex="-1" role="region" aria-label="Video Player" data-orientation="landscape">
+            <media-provider keep-alive="" data-media-provider="">
+                <iframe tabindex="-1" data-no-controls="" class="vds-youtube" aria-hidden="true" frameborder="0" allow="autoplay; fullscreen; encrypted-media; picture-in-picture; accelerometer; gyroscope"></iframe>
+            </media-provider>
+        </media-player>
     </div>
 
     <script>
         const params = new URLSearchParams(window.location.search);
-        let videoId = params.get('v') || '';
-        let autoplay = params.get('autoplay') === '1';
-        let startTime = parseFloat(params.get('t')) || 0;
-
-        let player = null;
-        let isReady = false;
-        let currentVid = videoId;
-        let endedReported = false;
-        let durationPollInterval = null;
+        const videoId = params.get('v');
+        const autoplay = params.get('autoplay');
+        const startTime = parseFloat(params.get('t')) || 0;
+        const player = document.getElementById('rmExternalPlayer');
 
         function postToParent(m) {
+            try { window.parent.postMessage(Object.assign({ source: 'x-player' }, m), '*'); } catch (e) {}
+        }
+
+        function safePlay() {
+            if (!player) return;
             try {
-                window.parent.postMessage(Object.assign({ source: 'x-player' }, m), '*');
+                const playPromise = player.play();
+                if (playPromise !== undefined && typeof playPromise.catch === 'function') {
+                    playPromise.catch(function (err) {});
+                }
             } catch (e) {}
         }
 
-        // Carga dinámica y ligera de la API oficial de YouTube (Sin frameworks externos)
-        const tag = document.createElement('script');
-        tag.src = "https://www.youtube.com/iframe_api";
-        const firstScriptTag = document.getElementsByTagName('script')[0];
-        firstScriptTag.parentNode.insertBefore(tag, firstScriptTag);
+        if (player) {
+            let currentVid = videoId || null;
+            let lastExpectedAutoplay = autoplay === '1';
+            let endedThisVideo = false;
+            let endedReported = false;
+            let reportedReady = false;
+            let loadFailed = false;
 
-        window.onYouTubeIframeAPIReady = function () {
-            player = new YT.Player('ytPlayer', {
-                width: '100%',
-                height: '100%',
-                videoId: videoId,
-                playerVars: {
-                    autoplay: autoplay ? 1 : 0,
-                    controls: 0,          // 0 interfaz de reproducción
-                    disablekb: 1,         // Desactiva teclado
-                    fs: 0,                // Desactiva botón pantalla completa
-                    iv_load_policy: 3,    // Oculta anotaciones y tarjetas
-                    modestbranding: 1,    // Minimiza logos
-                    rel: 0,               // Evita videos relacionados de otros canales
-                    playsinline: 1,
-                    origin: window.location.origin,
-                    start: Math.floor(startTime)
-                },
-                events: {
-                    'onReady': onPlayerReady,
-                    'onStateChange': onPlayerStateChange,
-                    'onError': onPlayerError
+            if (autoplay !== '1') player.removeAttribute('autoplay');
+
+            if (videoId) {
+                player.src = 'youtube/' + videoId;
+                if (autoplay === '1') {
+                    player.setAttribute('autoplay', '');
+                    lastExpectedAutoplay = true;
                 }
+                if (startTime > 0) {
+                    const onReadySeek = function () {
+                        player.removeEventListener('can-play', onReadySeek);
+                        try { player.currentTime = startTime; } catch (e) {}
+                    };
+                    player.addEventListener('can-play', onReadySeek);
+                }
+            }
+
+            function markReady() {
+                if (reportedReady || loadFailed) return;
+                reportedReady = true;
+                postToParent({ type: 'ready' });
+            }
+            player.addEventListener('can-play', markReady);
+            player.addEventListener('playing', markReady);
+            setTimeout(markReady, 2500);
+
+            player.addEventListener('error', function (event) {
+                loadFailed = true;
+                const detail = event && event.detail;
+                const message = detail && (detail.message || detail.error || detail.code);
+                postToParent({ type: 'error', videoId: currentVid, message: String(message || 'Video unavailable') });
             });
-        };
 
-        function onPlayerReady() {
-            isReady = true;
-            postToParent({ type: 'ready' });
-            reportDuration();
-
-            if (autoplay) {
-                try { player.playVideo(); } catch (e) {}
-            }
-        }
-
-        function onPlayerStateChange(event) {
-            // YT.PlayerState.PLAYING = 1
-            if (event.data === 1) {
-                endedReported = false;
-                reportDuration();
-            }
-            // YT.PlayerState.ENDED = 0
-            if (event.data === 0) {
+            player.addEventListener('ended', function () {
+                endedThisVideo = true;
                 if (!endedReported) {
                     endedReported = true;
                     postToParent({ type: 'ended', videoId: currentVid });
                 }
-            }
-        }
-
-        function onPlayerError(event) {
-            postToParent({
-                type: 'error',
-                videoId: currentVid,
-                message: 'YouTube Error Code: ' + event.data
             });
-        }
 
-        function reportDuration() {
-            if (!player || typeof player.getDuration !== 'function') return false;
-            try {
-                const d = player.getDuration();
+            function reportDuration() {
+                const d = player.duration;
                 if (d && isFinite(d) && d > 0) {
                     postToParent({ type: 'duration', videoId: currentVid, duration: d });
                     return true;
                 }
-            } catch (e) {}
-            return false;
-        }
+                return false;
+            }
 
-        // Sondeo para asegurar reporte de duración preciso
-        function scheduleReportDuration() {
-            if (durationPollInterval) clearInterval(durationPollInterval);
-            let retries = 0;
-            durationPollInterval = setInterval(() => {
-                if (reportDuration() || retries > 25) {
-                    clearInterval(durationPollInterval);
-                    durationPollInterval = null;
+            let durRetry = 0;
+            let reportInterval = null;
+            function scheduleReportDuration() {
+                durRetry = 0;
+                if (reportInterval) clearInterval(reportInterval);
+                reportInterval = setInterval(function () {
+                    if (reportDuration()) {
+                        clearInterval(reportInterval);
+                        reportInterval = null;
+                    } else {
+                        durRetry++;
+                        if (durRetry > 30) {
+                            clearInterval(reportInterval);
+                            reportInterval = null;
+                        }
+                    }
+                }, 1000);
+            }
+
+            player.addEventListener('durationchange', reportDuration);
+            player.addEventListener('duration-change', reportDuration);
+            player.addEventListener('loadedmetadata', reportDuration);
+            player.addEventListener('can-play', scheduleReportDuration);
+
+            // Verificador de reproducción automática y finalización
+            setInterval(function () {
+                if (endedThisVideo) {
+                    lastExpectedAutoplay = false;
+                    return;
                 }
-                retries++;
-            }, 800);
-        }
 
-        // Listener de comandos postMessage ('voice-eva')
-        window.addEventListener('message', function (ev) {
-            const data = ev.data;
-            if (!data || typeof data !== 'object' || data.source !== 'voice-eva') return;
+                try {
+                    if (player.duration && player.currentTime >= player.duration - 1) {
+                        endedThisVideo = true;
+                        if (!endedReported) {
+                            endedReported = true;
+                            postToParent({ type: 'ended', videoId: currentVid });
+                        }
+                        lastExpectedAutoplay = false;
+                        return;
+                    }
+                } catch (e) {}
 
-            try {
-                switch (data.type) {
-                    case 'load':
-                        if (data.videoId) {
-                            currentVid = data.videoId;
-                            endedReported = false;
-                            const startAt = Math.max(0, Number(data.time) || 0);
+                if (lastExpectedAutoplay && player.paused) {
+                    safePlay();
+                }
+            }, 2500);
 
-                            if (player && typeof player.loadVideoById === 'function') {
+            window.addEventListener('message', function (ev) {
+                const data = ev.data;
+                if (!data || typeof data !== 'object' || data.source !== 'voice-eva') return;
+                try {
+                    switch (data.type) {
+                        case 'load':
+                            if (data.videoId) {
+                                currentVid = data.videoId;
+                                endedThisVideo = false;
+                                endedReported = false;
+                                reportedReady = false;
+                                loadFailed = false;
+                                player.src = 'youtube/' + data.videoId;
+
                                 if (data.autoplay) {
-                                    player.loadVideoById({
-                                        videoId: data.videoId,
-                                        startSeconds: startAt
-                                    });
+                                    player.setAttribute('autoplay', '');
+                                    lastExpectedAutoplay = true;
                                 } else {
-                                    player.cueVideoById({
-                                        videoId: data.videoId,
-                                        startSeconds: startAt
-                                    });
+                                    player.removeAttribute('autoplay');
+                                    lastExpectedAutoplay = false;
                                 }
+
+                                const loadStart = Math.max(0, Number(data.time) || 0);
+                                const onCanPlay = function () {
+                                    player.removeEventListener('can-play', onCanPlay);
+                                    if (loadStart > 0) {
+                                        try { player.currentTime = loadStart; } catch (e) {}
+                                    }
+                                    if (lastExpectedAutoplay) {
+                                        safePlay();
+                                    }
+                                };
+                                player.addEventListener('can-play', onCanPlay);
+
                                 scheduleReportDuration();
                             }
-                        }
-                        break;
-
-                    case 'play':
-                        if (player && typeof player.playVideo === 'function') {
-                            player.playVideo();
-                        }
-                        break;
-
-                    case 'pause':
-                        if (player && typeof player.pauseVideo === 'function') {
-                            player.pauseVideo();
-                        }
-                        break;
-
-                    case 'seek':
-                        if (player && typeof player.seekTo === 'function') {
-                            player.seekTo(Math.max(0, Number(data.time) || 0), true);
-                        }
-                        break;
-
-                    case 'stop':
-                        if (player && typeof player.stopVideo === 'function') {
-                            player.stopVideo();
-                        }
-                        break;
-
-                    case 'mute':
-                        if (player && typeof player.mute === 'function') {
-                            player.mute();
-                        }
-                        break;
-
-                    case 'unmute':
-                        if (player && typeof player.unMute === 'function') {
-                            player.unMute();
-                        }
-                        break;
-
-                    case 'setVolume':
-                        if (player && typeof player.setVolume === 'function') {
-                            const vol = Math.max(0, Math.min(100, Number(data.volume) || 0));
-                            player.setVolume(vol);
-                        }
-                        break;
-                }
-            } catch (err) {}
-        });
+                            break;
+                        case 'play':
+                            lastExpectedAutoplay = true;
+                            safePlay();
+                            break;
+                        case 'pause':
+                            lastExpectedAutoplay = false;
+                            try { player.pause(); } catch (e) {}
+                            break;
+                        case 'seek':
+                            player.currentTime = Math.max(0, Number(data.time) || 0);
+                            break;
+                        case 'stop':
+                            lastExpectedAutoplay = false;
+                            try { player.pause(); } catch (e) {}
+                            player.currentTime = 0;
+                            break;
+                        case 'mute':
+                            player.muted = true;
+                            break;
+                        case 'unmute':
+                            player.muted = false;
+                            break;
+                        case 'setVolume':
+                            player.volume = Math.max(0, Math.min(1, (Number(data.volume) || 0) / 100));
+                            break;
+                    }
+                } catch (e) {}
+            });
+        }
     </script>
 </body>
 </html>
