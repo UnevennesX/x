@@ -252,28 +252,23 @@
             hideSpinner();
             errorView.classList.remove('active');
 
-            // Solo enviar 'ready' cuando tengamos una duración real disponible.
-            // Si aún no la hay, reintentar hasta obtenerla (evita reportar duration 0 al padre).
+            const dur = (player && Number(player.duration) > 0) ? Number(player.duration) : 0;
+            const pos = (player && Number(player.currentTime) > 0) ? Number(player.currentTime) : 0;
+
             if (!reportedReady) {
-                if (reportDurationNow()) {
-                    reportedReady = true;
-                    const pos = (player && Number(player.currentTime) > 0) ? Number(player.currentTime) : 0;
-                    postToParent({ type: 'ready', videoId: currentVid, duration: player.duration, time: pos });
-                } else if (!pendingDurationTimer) {
-                    pendingDurationTimer = setInterval(function () {
-                        if (hasActiveError) { clearPendingDuration(); return; }
-                        const dur = (player && Number(player.duration) > 0) ? Number(player.duration) : 0;
-                        if (dur > 0) {
-                            reportedReady = true;
-                            const pos = (player && Number(player.currentTime) > 0) ? Number(player.currentTime) : 0;
-                            postToParent({ type: 'ready', videoId: currentVid, duration: dur, time: pos });
-                            clearPendingDuration();
-                        } else if (player.paused && isRealPlaybackActive) {
-                            // Si el video está pausado (autoplay bloqueado pero carga OK) sin error,
-                            // aún así reportamos duración cuando esté disponible; reintentamos.
-                        }
-                    }, 700);
-                }
+                reportedReady = true;
+                postToParent({ type: 'ready', videoId: currentVid, duration: dur, time: pos });
+            }
+
+            if (dur === 0 && !pendingDurationTimer) {
+                pendingDurationTimer = setInterval(function () {
+                    if (hasActiveError) { clearPendingDuration(); return; }
+                    const d = (player && Number(player.duration) > 0) ? Number(player.duration) : 0;
+                    if (d > 0) {
+                        postToParent({ type: 'duration', videoId: currentVid, duration: d });
+                        clearPendingDuration();
+                    }
+                }, 500);
             }
 
             startProgressReport();
@@ -333,6 +328,14 @@
         if (player) {
             if (autoplay !== '1') player.removeAttribute('autoplay');
 
+            player.addEventListener('can-play', function () {
+                hideSpinner();
+                if (!reportedReady && currentVid) {
+                    reportedReady = true;
+                    postToParent({ type: 'ready', videoId: currentVid, duration: Number(player.duration) || 0, time: Number(player.currentTime) || 0 });
+                }
+            });
+
             if (videoId) {
                 showSpinner();
                 videoCover.classList.remove('hidden');
@@ -354,7 +357,10 @@
             }
 
             // Eventos nativos de Vidstack
-            player.addEventListener('playing', function(){ console.log('[X] playing, ct=', player.currentTime, 'vid=', currentVid); triggerPlaybackStarted(); });
+            player.addEventListener('playing', function(){ 
+                console.log('[X] playing, ct=', player.currentTime, 'vid=', currentVid); 
+                triggerPlaybackStarted(); 
+            });
 
             player.addEventListener('time-update', function() {
                 if (!isRealPlaybackActive && player.currentTime > 0) {
@@ -394,7 +400,6 @@
                 }
             });
 
-            // Reportar la duración real apenas esté disponible (solución de raíz para el "N/A")
             player.addEventListener('durationchange', function () {
                 reportDurationNow();
             });
@@ -459,11 +464,15 @@
 
                                 const onCanPlay = function () {
                                     player.removeEventListener('can-play', onCanPlay);
+                                    hideSpinner();
                                     if (typeof data.time !== 'undefined' && Number(data.time) > 0) {
                                         player.currentTime = Number(data.time);
                                     }
-                                    // Reportar la duración real apenas esté disponible para evitar "N/A"
                                     reportDurationNow();
+                                    if (!reportedReady && currentVid) {
+                                        reportedReady = true;
+                                        postToParent({ type: 'ready', videoId: currentVid, duration: Number(player.duration) || 0, time: Number(player.currentTime) || 0 });
+                                    }
                                     if (lastExpectedAutoplay && !hasActiveError) {
                                         safePlay();
                                     }
@@ -485,8 +494,6 @@
                             break;
                         case 'seek':
                             if (player && typeof data.time !== 'undefined') {
-                                // Al mover el video se resetea el estado de "terminado"
-                                // para que pueda volver a reproducirse y detectar su final de nuevo.
                                 endedReported = false;
                                 isRealPlaybackActive = false;
                                 player.currentTime = Number(data.time) || 0;
