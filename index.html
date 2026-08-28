@@ -261,36 +261,16 @@
                 hideSpinner();
             }
 
-// Eventos nativos de Vidstack
-             player.addEventListener('playing', triggerPlaybackStarted);
+            // Eventos nativos de Vidstack
+            player.addEventListener('playing', triggerPlaybackStarted);
 
-             player.addEventListener('time-update', function() {
-                 if (!isRealPlaybackActive && player.currentTime > 0) {
-                     triggerPlaybackStarted();
-                 }
-             });
+            player.addEventListener('time-update', function() {
+                if (!isRealPlaybackActive && player.currentTime > 0) {
+                    triggerPlaybackStarted();
+                }
+            });
 
-             player.addEventListener('durationchange', function() {
-                 if (player.duration && !isNaN(player.duration)) {
-                     postToParent({
-                         type: 'duration',
-                         duration: player.duration,
-                         videoId: currentVid
-                     });
-                 }
-             });
-
-             player.addEventListener('loadedmetadata', function() {
-                 if (player.duration && !isNaN(player.duration)) {
-                     postToParent({
-                         type: 'duration',
-                         duration: player.duration,
-                         videoId: currentVid
-                     });
-                 }
-             });
-
-             player.addEventListener('waiting', function() {
+            player.addEventListener('waiting', function() {
                 if (!hasActiveError && !isRealPlaybackActive) {
                     showSpinner();
                 }
@@ -412,16 +392,13 @@
                                 } catch (e) {}
                             }
                             break;
-case 'getCurrentTime':
-                             postToParent({
-                                 type: 'currentTime',
-                                 currentTime: player.currentTime || 0,
-                                 videoId: currentVid
-                             });
-                             break;
-                         case 'duration':
-                             // Ignorar mensajes de duración del servidor (solo el reproductor los envía)
-                             break;
+                        case 'getCurrentTime':
+                            postToParent({
+                                type: 'currentTime',
+                                currentTime: player.currentTime || 0,
+                                videoId: currentVid
+                            });
+                            break;
                     }
                 } catch (e) {}
             });
