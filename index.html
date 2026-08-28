@@ -381,24 +381,6 @@
                         case 'setVolume':
                             player.volume = Math.max(0, Math.min(1, (Number(data.volume) || 0) / 100));
                             break;
-                        case 'seek':
-                            if (typeof data.currentTime === 'number' && data.currentTime >= 0) {
-                                try {
-                                    const diff = Math.abs((player.currentTime || 0) - data.currentTime);
-                                    // Solo aplicar seek si la diferencia es significativa (> 0.5s) para evitar micro-saltos de audio
-                                    if (diff > 0.5) {
-                                        player.currentTime = data.currentTime;
-                                    }
-                                } catch (e) {}
-                            }
-                            break;
-                        case 'getCurrentTime':
-                            postToParent({
-                                type: 'currentTime',
-                                currentTime: player.currentTime || 0,
-                                videoId: currentVid
-                            });
-                            break;
                     }
                 } catch (e) {}
             });
