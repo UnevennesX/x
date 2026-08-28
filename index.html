@@ -39,7 +39,6 @@
             background: #000000;
         }
 
-        /* El reproductor se mantiene en el DOM sin visibility:hidden para que el navegador no lo congele */
         #rmExternalPlayer {
             width: 100% !important;
             height: 100% !important;
@@ -48,7 +47,6 @@
             --media-font-family: inherit;
         }
 
-        /* Telón negro protector: cubre YouTube mientras carga para no ver cajas grises */
         .video-cover {
             position: absolute;
             inset: 0;
@@ -173,6 +171,7 @@
         let lastExpectedAutoplay = autoplay === '1';
         let endedReported = false;
         let reportedReady = false;
+        let autoPlayCheckInterval = null;
 
         const ERRORS_MAP = {
             150: 'El contenido tiene restricciones de derechos de autor o el autor bloqueó su reproducción externa.',
@@ -198,6 +197,11 @@
             isRealPlaybackActive = false;
             lastExpectedAutoplay = false;
 
+            if (autoPlayCheckInterval) {
+                clearInterval(autoPlayCheckInterval);
+                autoPlayCheckInterval = null;
+            }
+
             videoCover.classList.remove('hidden');
             hideSpinner();
 
@@ -221,6 +225,11 @@
         function triggerPlaybackStarted() {
             if (hasActiveError || isRealPlaybackActive) return;
             isRealPlaybackActive = true;
+
+            if (autoPlayCheckInterval) {
+                clearInterval(autoPlayCheckInterval);
+                autoPlayCheckInterval = null;
+            }
             
             // Destapar el video y ocultar spinner
             videoCover.classList.add('hidden');
@@ -229,7 +238,9 @@
 
             if (!reportedReady) {
                 reportedReady = true;
-                postToParent({ type: 'ready' });
+                const dur = (player && Number(player.duration) > 0) ? Number(player.duration) : 0;
+                const pos = (player && Number(player.currentTime) > 0) ? Number(player.currentTime) : 0;
+                postToParent({ type: 'ready', videoId: currentVid, duration: dur, time: pos });
             }
         }
 
@@ -245,6 +256,20 @@
                     p.catch(function () {});
                 }
             } catch (e) {}
+        }
+
+        function startAutoplayWatchdog() {
+            if (autoPlayCheckInterval) clearInterval(autoPlayCheckInterval);
+            autoPlayCheckInterval = setInterval(function () {
+                if (hasActiveError || isRealPlaybackActive) {
+                    clearInterval(autoPlayCheckInterval);
+                    autoPlayCheckInterval = null;
+                    return;
+                }
+                if (lastExpectedAutoplay && player && player.paused) {
+                    safePlay();
+                }
+            }, 800);
         }
 
         if (player) {
@@ -265,6 +290,7 @@
                     };
                     player.addEventListener('can-play', onInitialReady);
                 }
+                startAutoplayWatchdog();
             } else {
                 hideSpinner();
             }
@@ -297,22 +323,9 @@
                 }
             });
 
-            // Reintento activo de autoplay si está en pausa inicial
-            const autoPlayCheckInterval = setInterval(function () {
-                if (hasActiveError || isRealPlaybackActive) {
-                    clearInterval(autoPlayCheckInterval);
-                    return;
-                }
-                if (lastExpectedAutoplay && player.paused) {
-                    safePlay();
-                }
-            }, 800);
-
-            // Escucha directa de mensajes (PostMessage de YouTube Iframe API y de la app padre)
+            // Escucha directa de mensajes
             window.addEventListener('message', function (ev) {
-                // Interceptar eventos de YouTube Iframe API
                 if (typeof ev.data === 'string') {
-                    // Si YouTube emite onError
                     if (ev.data.includes('onError')) {
                         try {
                             const ytData = JSON.parse(ev.data);
@@ -321,12 +334,11 @@
                             }
                         } catch (e) {}
                     }
-                    // Si YouTube emite onStateChange = 1 (PLAYING)
                     if (ev.data.includes('onStateChange') || ev.data.includes('infoDelivery')) {
                         try {
                             const ytData = JSON.parse(ev.data);
                             const state = ytData.info && ytData.info.playerState !== undefined ? ytData.info.playerState : ytData.info;
-                            if (state === 1) { // 1 = YT.PlayerState.PLAYING
+                            if (state === 1) { // PLAYING
                                 triggerPlaybackStarted();
                             }
                         } catch (e) {}
@@ -370,6 +382,7 @@
                                     }
                                 };
                                 player.addEventListener('can-play', onCanPlay);
+                                startAutoplayWatchdog();
                             }
                             break;
                         case 'play':
