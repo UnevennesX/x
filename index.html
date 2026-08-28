@@ -172,6 +172,8 @@
         let endedReported = false;
         let reportedReady = false;
         let autoPlayCheckInterval = null;
+        let pendingDurationTimer = null;
+        let progressReportInterval = null;
 
         const ERRORS_MAP = {
             150: 'El contenido tiene restricciones de derechos de autor o el autor bloqueó su reproducción externa.',
@@ -201,6 +203,11 @@
                 clearInterval(autoPlayCheckInterval);
                 autoPlayCheckInterval = null;
             }
+            clearPendingDuration();
+            if (progressReportInterval) {
+                clearInterval(progressReportInterval);
+                progressReportInterval = null;
+            }
 
             videoCover.classList.remove('hidden');
             hideSpinner();
@@ -222,6 +229,15 @@
             postToParent({ type: 'error', videoId: currentVid, code: code, message: msg });
         }
 
+        function reportDurationNow() {
+            const dur = (player && Number(player.duration) > 0) ? Number(player.duration) : 0;
+            if (dur > 0) {
+                postToParent({ type: 'duration', videoId: currentVid, duration: dur });
+                return true;
+            }
+            return false;
+        }
+
         function triggerPlaybackStarted() {
             if (hasActiveError || isRealPlaybackActive) return;
             isRealPlaybackActive = true;
@@ -236,12 +252,54 @@
             hideSpinner();
             errorView.classList.remove('active');
 
+            // Solo enviar 'ready' cuando tengamos una duración real disponible.
+            // Si aún no la hay, reintentar hasta obtenerla (evita reportar duration 0 al padre).
             if (!reportedReady) {
-                reportedReady = true;
-                const dur = (player && Number(player.duration) > 0) ? Number(player.duration) : 0;
-                const pos = (player && Number(player.currentTime) > 0) ? Number(player.currentTime) : 0;
-                postToParent({ type: 'ready', videoId: currentVid, duration: dur, time: pos });
+                if (reportDurationNow()) {
+                    reportedReady = true;
+                    const pos = (player && Number(player.currentTime) > 0) ? Number(player.currentTime) : 0;
+                    postToParent({ type: 'ready', videoId: currentVid, duration: player.duration, time: pos });
+                } else if (!pendingDurationTimer) {
+                    pendingDurationTimer = setInterval(function () {
+                        if (hasActiveError) { clearPendingDuration(); return; }
+                        const dur = (player && Number(player.duration) > 0) ? Number(player.duration) : 0;
+                        if (dur > 0) {
+                            reportedReady = true;
+                            const pos = (player && Number(player.currentTime) > 0) ? Number(player.currentTime) : 0;
+                            postToParent({ type: 'ready', videoId: currentVid, duration: dur, time: pos });
+                            clearPendingDuration();
+                        } else if (player.paused && isRealPlaybackActive) {
+                            // Si el video está pausado (autoplay bloqueado pero carga OK) sin error,
+                            // aún así reportamos duración cuando esté disponible; reintentamos.
+                        }
+                    }, 700);
+                }
             }
+
+            startProgressReport();
+        }
+
+        function clearPendingDuration() {
+            if (pendingDurationTimer) {
+                clearInterval(pendingDurationTimer);
+                pendingDurationTimer = null;
+            }
+        }
+
+        function startProgressReport() {
+            if (progressReportInterval) clearInterval(progressReportInterval);
+            progressReportInterval = setInterval(function () {
+                if (!isRealPlaybackActive || hasActiveError) {
+                    clearInterval(progressReportInterval);
+                    progressReportInterval = null;
+                    return;
+                }
+                const t = (player && Number(player.currentTime)) || 0;
+                const d = (player && Number(player.duration)) || 0;
+                try {
+                    postToParent({ type: 'progress', videoId: currentVid, time: t, duration: d, playing: !player.paused });
+                } catch (e) {}
+            }, 1000);
         }
 
         function postToParent(m) {
@@ -319,8 +377,24 @@
             player.addEventListener('ended', function () {
                 if (!endedReported) {
                     endedReported = true;
+                    isRealPlaybackActive = false;
+                    lastExpectedAutoplay = false;
+                    clearPendingDuration();
+                    if (progressReportInterval) {
+                        clearInterval(progressReportInterval);
+                        progressReportInterval = null;
+                    }
+                    try { player.pause(); } catch (e) {}
                     postToParent({ type: 'ended', videoId: currentVid });
                 }
+            });
+
+            // Reportar la duración real apenas esté disponible (solución de raíz para el "N/A")
+            player.addEventListener('durationchange', function () {
+                reportDurationNow();
+            });
+            player.addEventListener('loaded-metadata', function () {
+                reportDurationNow();
             });
 
             // Escucha directa de mensajes
@@ -353,6 +427,11 @@
                             if (data.videoId) {
                                 hasActiveError = false;
                                 isRealPlaybackActive = false;
+                                clearPendingDuration();
+                                if (progressReportInterval) {
+                                    clearInterval(progressReportInterval);
+                                    progressReportInterval = null;
+                                }
                                 
                                 videoCover.classList.remove('hidden');
                                 errorView.classList.remove('active');
@@ -377,6 +456,8 @@
                                     if (typeof data.time !== 'undefined' && Number(data.time) > 0) {
                                         player.currentTime = Number(data.time);
                                     }
+                                    // Reportar la duración real apenas esté disponible para evitar "N/A"
+                                    reportDurationNow();
                                     if (lastExpectedAutoplay && !hasActiveError) {
                                         safePlay();
                                     }
