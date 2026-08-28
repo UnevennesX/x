@@ -479,7 +479,16 @@
                             break;
                         case 'seek':
                             if (player && typeof data.time !== 'undefined') {
+                                // Al mover el video se resetea el estado de "terminado"
+                                // para que pueda volver a reproducirse y detectar su final de nuevo.
+                                endedReported = false;
+                                isRealPlaybackActive = false;
                                 player.currentTime = Number(data.time) || 0;
+                                clearPendingDuration();
+                                if (lastExpectedAutoplay && !hasActiveError) {
+                                    safePlay();
+                                }
+                                startAutoplayWatchdog();
                             }
                             break;
                         case 'mute':
