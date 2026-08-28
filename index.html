@@ -354,7 +354,7 @@
             }
 
             // Eventos nativos de Vidstack
-            player.addEventListener('playing', triggerPlaybackStarted);
+            player.addEventListener('playing', function(){ console.log('[X] playing, ct=', player.currentTime, 'vid=', currentVid); triggerPlaybackStarted(); });
 
             player.addEventListener('time-update', function() {
                 if (!isRealPlaybackActive && player.currentTime > 0) {
@@ -376,6 +376,7 @@
 
             player.addEventListener('ended', function () {
                 if (!endedReported) {
+                    console.log('[X] ENDED fired, currentTime=', player.currentTime, 'duration=', player.duration, 'vid=', currentVid);
                     endedReported = true;
                     isRealPlaybackActive = false;
                     lastExpectedAutoplay = false;
@@ -429,6 +430,7 @@
                     switch (data.type) {
                         case 'load':
                             if (data.videoId) {
+                                console.log('[X] LOAD', data.videoId, 'autoplay=', data.autoplay, 'time=', data.time);
                                 hasActiveError = false;
                                 isRealPlaybackActive = false;
                                 clearPendingDuration();
