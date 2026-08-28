@@ -436,6 +436,22 @@
                         case 'load':
                             if (data.videoId) {
                                 console.log('[X] LOAD', data.videoId, 'autoplay=', data.autoplay, 'time=', data.time);
+                                
+                                // Si ya es el mismo video inicializándose y sin error, no reiniciar el iframe de YouTube
+                                if (currentVid === data.videoId && !hasActiveError && player.src) {
+                                    if (data.autoplay) {
+                                        lastExpectedAutoplay = true;
+                                        safePlay();
+                                    } else {
+                                        lastExpectedAutoplay = false;
+                                        try { player.pause(); } catch (e) {}
+                                    }
+                                    if (typeof data.time !== 'undefined' && Number(data.time) > 0) {
+                                        player.currentTime = Number(data.time);
+                                    }
+                                    break;
+                                }
+
                                 hasActiveError = false;
                                 isRealPlaybackActive = false;
                                 clearPendingDuration();
