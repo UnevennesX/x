@@ -384,7 +384,18 @@
                         clearInterval(progressReportInterval);
                         progressReportInterval = null;
                     }
-                    try { player.pause(); } catch (e) {}
+                    if (autoPlayCheckInterval) {
+                        clearInterval(autoPlayCheckInterval);
+                        autoPlayCheckInterval = null;
+                    }
+                    // Ocultar el video de inmediato para que no muestre un destello del inicio
+                    // mientras el padre procesa el "ended" y decide el siguiente paso.
+                    videoCover.classList.remove('hidden');
+                    try {
+                        player.pause();
+                        player.src = '';
+                        if (ytIframe) ytIframe.src = 'about:blank';
+                    } catch (e) {}
                     postToParent({ type: 'ended', videoId: currentVid });
                 }
             });
