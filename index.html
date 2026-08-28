@@ -39,6 +39,7 @@
             background: #000000;
         }
 
+        /* El reproductor se mantiene en el DOM sin visibility:hidden para que el navegador no lo congele */
         #rmExternalPlayer {
             width: 100% !important;
             height: 100% !important;
@@ -47,21 +48,17 @@
             --media-font-family: inherit;
         }
 
-        /* --- SI HAY ERROR: DESAPARECER CUALQUIER BARRA O CONTROL --- */
-        #playerHost.is-error #rmExternalPlayer,
-        #playerHost.is-error media-player,
-        #playerHost.is-error media-controls,
-        #playerHost.is-error .vds-time-slider,
-        #playerHost.is-error .vds-controls,
-        #playerHost.is-error .vds-slider,
-        #playerHost.is-error [data-media-slider] {
+        /* Si hay error, ocultar cualquier elemento o control residual de Vidstack */
+        #playerHost.has-error #rmExternalPlayer,
+        #playerHost.has-error media-player,
+        #playerHost.has-error .vds-time-slider,
+        #playerHost.has-error .vds-controls {
             display: none !important;
-            visibility: hidden !important;
-            opacity: 0 !important;
             pointer-events: none !important;
+            visibility: hidden !important;
         }
 
-        /* Telón negro protector: cubre YouTube mientras carga */
+        /* Telón negro protector: cubre YouTube mientras carga para no ver cajas grises */
         .video-cover {
             position: absolute;
             inset: 0;
@@ -101,12 +98,12 @@
             to { transform: rotate(360deg); }
         }
 
-        /* --- Pantalla de Error (Ocupa el 100% con fondo negro sólido) --- */
+        /* --- Error Minimalista --- */
         .minimal-error {
             position: absolute;
             inset: 0;
-            z-index: 99999;
-            background: #000000 !important;
+            z-index: 100;
+            background: #000000;
             display: flex;
             flex-direction: column;
             align-items: center;
@@ -115,7 +112,7 @@
             text-align: center;
             opacity: 0;
             pointer-events: none;
-            transition: opacity 0.15s ease;
+            transition: opacity 0.2s ease;
         }
 
         .minimal-error.active {
@@ -136,7 +133,7 @@
             font-size: 14px;
             font-weight: 400;
             color: #e5e5e5;
-            max-width: 340px;
+            max-width: 320px;
             line-height: 1.5;
             margin: 0;
         }
@@ -144,13 +141,13 @@
 </head>
 <body>
     <div id="playerHost">
-        <!-- Telón negro protector -->
+        <!-- Telón negro que cubre la carga -->
         <div id="videoCover" class="video-cover"></div>
 
         <!-- Spinner -->
         <div id="loadingSpinner" class="minimal-spinner active"></div>
 
-        <!-- Pantalla de Error Absoluta -->
+        <!-- Pantalla de Error -->
         <div id="errorView" class="minimal-error">
             <span id="errCode" class="error-tag">ERROR</span>
             <p id="errText" class="error-msg">No se pudo reproducir este video.</p>
@@ -218,8 +215,7 @@
                 autoPlayCheckInterval = null;
             }
 
-            // Ocultar cualquier rastro del reproductor y barras
-            playerHost.classList.add('is-error');
+            if (playerHost) playerHost.classList.add('has-error');
             videoCover.classList.remove('hidden');
             hideSpinner();
 
@@ -255,10 +251,10 @@
             if (hasActiveError || isRealPlaybackActive) return;
             isRealPlaybackActive = true;
             
-            playerHost.classList.remove('is-error');
             videoCover.classList.add('hidden');
             hideSpinner();
             errorView.classList.remove('active');
+            if (playerHost) playerHost.classList.remove('has-error');
 
             if (!reportedReady) {
                 reportedReady = true;
@@ -302,7 +298,7 @@
                 hideSpinner();
             }
 
-            // Eventos Vidstack
+            // Eventos nativos de Vidstack
             player.addEventListener('playing', function() {
                 if (hasActiveError) {
                     try { player.pause(); } catch(e) {}
@@ -340,6 +336,7 @@
                 }
             });
 
+            // Reintento activo de autoplay si está en pausa inicial
             autoPlayCheckInterval = setInterval(function () {
                 if (hasActiveError || isRealPlaybackActive) {
                     clearInterval(autoPlayCheckInterval);
@@ -351,9 +348,11 @@
                 }
             }, 800);
 
-            // Mensajes YouTube API y ventana padre
+            // Escucha directa de mensajes (PostMessage de YouTube Iframe API y de la app padre)
             window.addEventListener('message', function (ev) {
+                // Interceptar eventos de YouTube Iframe API
                 if (typeof ev.data === 'string') {
+                    // Si YouTube emite onError
                     if (ev.data.includes('onError')) {
                         try {
                             const ytData = JSON.parse(ev.data);
@@ -362,11 +361,12 @@
                             }
                         } catch (e) {}
                     }
+                    // Si YouTube emite onStateChange = 1 (PLAYING)
                     if (ev.data.includes('onStateChange') || ev.data.includes('infoDelivery')) {
                         try {
                             const ytData = JSON.parse(ev.data);
                             const state = ytData.info && ytData.info.playerState !== undefined ? ytData.info.playerState : ytData.info;
-                            if (state === 1) {
+                            if (state === 1) { // 1 = YT.PlayerState.PLAYING
                                 if (!hasActiveError) triggerPlaybackStarted();
                             }
                         } catch (e) {}
@@ -381,7 +381,7 @@
                             if (data.videoId) {
                                 hasActiveError = false;
                                 isRealPlaybackActive = false;
-                                playerHost.classList.remove('is-error');
+                                if (playerHost) playerHost.classList.remove('has-error');
                                 
                                 videoCover.classList.remove('hidden');
                                 errorView.classList.remove('active');
@@ -413,12 +413,13 @@
                                 };
                                 player.addEventListener('can-play', onCanPlay);
                             } else {
+                                // Caso vacío: limpiar reproductor
                                 hasActiveError = false;
                                 isRealPlaybackActive = false;
                                 currentVid = null;
                                 hideSpinner();
                                 videoCover.classList.remove('hidden');
-                                playerHost.classList.remove('is-error');
+                                if (playerHost) playerHost.classList.remove('has-error');
                                 try {
                                     player.pause();
                                     player.currentTime = 0;
