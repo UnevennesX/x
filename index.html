@@ -48,6 +48,16 @@
             --media-font-family: inherit;
         }
 
+        /* Si hay error, ocultar cualquier elemento o control residual de Vidstack */
+        #playerHost.has-error #rmExternalPlayer,
+        #playerHost.has-error media-player,
+        #playerHost.has-error .vds-time-slider,
+        #playerHost.has-error .vds-controls {
+            display: none !important;
+            pointer-events: none !important;
+            visibility: hidden !important;
+        }
+
         /* Telón negro protector: cubre YouTube mientras carga para no ver cajas grises */
         .video-cover {
             position: absolute;
@@ -156,6 +166,7 @@
         const videoId = params.get('v');
         const autoplay = params.get('autoplay');
         const startTime = Number(params.get('t')) || 0;
+        const playerHost = document.getElementById('playerHost');
         const player = document.getElementById('rmExternalPlayer');
         const ytIframe = document.getElementById('ytIframe');
 
@@ -173,6 +184,7 @@
         let lastExpectedAutoplay = autoplay === '1';
         let endedReported = false;
         let reportedReady = false;
+        let autoPlayCheckInterval = null;
 
         const ERRORS_MAP = {
             150: 'El contenido tiene restricciones de derechos de autor o el autor bloqueó su reproducción externa.',
@@ -198,6 +210,12 @@
             isRealPlaybackActive = false;
             lastExpectedAutoplay = false;
 
+            if (autoPlayCheckInterval) {
+                clearInterval(autoPlayCheckInterval);
+                autoPlayCheckInterval = null;
+            }
+
+            if (playerHost) playerHost.classList.add('has-error');
             videoCover.classList.remove('hidden');
             hideSpinner();
 
@@ -210,26 +228,37 @@
             errorView.classList.add('active');
 
             try {
-                if (player) player.src = '';
+                if (player) {
+                    player.pause();
+                    player.currentTime = 0;
+                    player.src = '';
+                }
                 if (ytIframe) ytIframe.src = 'about:blank';
             } catch (e) {}
 
             console.error(`[Player Error] Code: ${code} | Video: ${currentVid}`);
-            postToParent({ type: 'error', videoId: currentVid, code: code, message: msg });
+            postToParent({
+                type: 'error',
+                videoId: currentVid,
+                code: code,
+                message: msg,
+                position: 0,
+                isPlaying: false
+            });
         }
 
         function triggerPlaybackStarted() {
             if (hasActiveError || isRealPlaybackActive) return;
             isRealPlaybackActive = true;
             
-            // Destapar el video y ocultar spinner
             videoCover.classList.add('hidden');
             hideSpinner();
             errorView.classList.remove('active');
+            if (playerHost) playerHost.classList.remove('has-error');
 
             if (!reportedReady) {
                 reportedReady = true;
-                postToParent({ type: 'ready' });
+                postToParent({ type: 'ready', videoId: currentVid });
             }
         }
 
@@ -261,7 +290,7 @@
                 if (startTime > 0) {
                     const onInitialReady = function () {
                         player.removeEventListener('can-play', onInitialReady);
-                        player.currentTime = startTime;
+                        if (!hasActiveError) player.currentTime = startTime;
                     };
                     player.addEventListener('can-play', onInitialReady);
                 }
@@ -270,9 +299,19 @@
             }
 
             // Eventos nativos de Vidstack
-            player.addEventListener('playing', triggerPlaybackStarted);
+            player.addEventListener('playing', function() {
+                if (hasActiveError) {
+                    try { player.pause(); } catch(e) {}
+                    return;
+                }
+                triggerPlaybackStarted();
+            });
 
             player.addEventListener('time-update', function() {
+                if (hasActiveError) {
+                    try { player.pause(); player.currentTime = 0; } catch(e) {}
+                    return;
+                }
                 if (!isRealPlaybackActive && player.currentTime > 0) {
                     triggerPlaybackStarted();
                 }
@@ -291,16 +330,17 @@
             });
 
             player.addEventListener('ended', function () {
-                if (!endedReported) {
+                if (!endedReported && !hasActiveError) {
                     endedReported = true;
                     postToParent({ type: 'ended', videoId: currentVid });
                 }
             });
 
             // Reintento activo de autoplay si está en pausa inicial
-            const autoPlayCheckInterval = setInterval(function () {
+            autoPlayCheckInterval = setInterval(function () {
                 if (hasActiveError || isRealPlaybackActive) {
                     clearInterval(autoPlayCheckInterval);
+                    autoPlayCheckInterval = null;
                     return;
                 }
                 if (lastExpectedAutoplay && player.paused) {
@@ -327,7 +367,7 @@
                             const ytData = JSON.parse(ev.data);
                             const state = ytData.info && ytData.info.playerState !== undefined ? ytData.info.playerState : ytData.info;
                             if (state === 1) { // 1 = YT.PlayerState.PLAYING
-                                triggerPlaybackStarted();
+                                if (!hasActiveError) triggerPlaybackStarted();
                             }
                         } catch (e) {}
                     }
@@ -341,6 +381,7 @@
                             if (data.videoId) {
                                 hasActiveError = false;
                                 isRealPlaybackActive = false;
+                                if (playerHost) playerHost.classList.remove('has-error');
                                 
                                 videoCover.classList.remove('hidden');
                                 errorView.classList.remove('active');
@@ -362,6 +403,7 @@
 
                                 const onCanPlay = function () {
                                     player.removeEventListener('can-play', onCanPlay);
+                                    if (hasActiveError) return;
                                     if (typeof data.time !== 'undefined' && Number(data.time) > 0) {
                                         player.currentTime = Number(data.time);
                                     }
@@ -370,6 +412,19 @@
                                     }
                                 };
                                 player.addEventListener('can-play', onCanPlay);
+                            } else {
+                                // Caso vacío: limpiar reproductor
+                                hasActiveError = false;
+                                isRealPlaybackActive = false;
+                                currentVid = null;
+                                hideSpinner();
+                                videoCover.classList.remove('hidden');
+                                if (playerHost) playerHost.classList.remove('has-error');
+                                try {
+                                    player.pause();
+                                    player.currentTime = 0;
+                                    player.src = '';
+                                } catch (e) {}
                             }
                             break;
                         case 'play':
@@ -384,7 +439,7 @@
                             try { player.pause(); } catch (e) {}
                             break;
                         case 'seek':
-                            if (player && typeof data.time !== 'undefined') {
+                            if (player && typeof data.time !== 'undefined' && !hasActiveError) {
                                 player.currentTime = Number(data.time) || 0;
                             }
                             break;
