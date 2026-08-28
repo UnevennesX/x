@@ -155,6 +155,7 @@
         const params = new URLSearchParams(window.location.search);
         const videoId = params.get('v');
         const autoplay = params.get('autoplay');
+        const startTime = Number(params.get('t')) || 0;
         const player = document.getElementById('rmExternalPlayer');
         const ytIframe = document.getElementById('ytIframe');
 
@@ -256,6 +257,13 @@
                 if (autoplay === '1') {
                     player.setAttribute('autoplay', '');
                     lastExpectedAutoplay = true;
+                }
+                if (startTime > 0) {
+                    const onInitialReady = function () {
+                        player.removeEventListener('can-play', onInitialReady);
+                        player.currentTime = startTime;
+                    };
+                    player.addEventListener('can-play', onInitialReady);
                 }
             } else {
                 hideSpinner();
