@@ -354,6 +354,9 @@
 
                                 const onCanPlay = function () {
                                     player.removeEventListener('can-play', onCanPlay);
+                                    if (typeof data.time !== 'undefined' && Number(data.time) > 0) {
+                                        player.currentTime = Number(data.time);
+                                    }
                                     if (lastExpectedAutoplay && !hasActiveError) {
                                         safePlay();
                                     }
@@ -371,6 +374,11 @@
                         case 'stop':
                             lastExpectedAutoplay = false;
                             try { player.pause(); } catch (e) {}
+                            break;
+                        case 'seek':
+                            if (player && typeof data.time !== 'undefined') {
+                                player.currentTime = Number(data.time) || 0;
+                            }
                             break;
                         case 'mute':
                             player.muted = true;
