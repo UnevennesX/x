@@ -371,7 +371,13 @@
             player.addEventListener('error', function(event) {
                 const detail = event && event.detail;
                 const err = (detail && (detail.code || detail.message || detail.error)) || 'Playback Error';
+                console.warn('[X] media ERROR', event, 'code=', err);
                 triggerError(err);
+            });
+            ['loadedmetadata','loadeddata','canplay','canplaythrough','stalled','suspend','abort','emptied','loadstart','progress'].forEach(function (evName) {
+                player.addEventListener(evName, function () {
+                    console.log('[X] event', evName, 'ct=', player.currentTime, 'dur=', player.duration, 'err=', player.error ? (player.error.code + ':' + player.error.message) : '-', 'vid=', currentVid);
+                });
             });
 
             player.addEventListener('ended', function () {
@@ -404,7 +410,10 @@
 
             // Escucha directa de mensajes
             window.addEventListener('message', function (ev) {
-                if (typeof ev.data === 'string') {
+                if (typeof ev.data === 'string' && (ev.data.includes('onError') || ev.data.includes('onStateChange') || ev.data.includes('infoDelivery'))) {
+                    console.log('[X] YT-msg', ev.data.slice(0, 160));
+                }
+                if (typeof ev.data === 'string' && !ev.data.includes('voice-eva')) {
                     if (ev.data.includes('onError')) {
                         try {
                             const ytData = JSON.parse(ev.data);
@@ -482,6 +491,30 @@
                         case 'stop':
                             lastExpectedAutoplay = false;
                             try { player.pause(); } catch (e) {}
+                            break;
+                        case 'show_error':
+                            hasActiveError = true;
+                            isRealPlaybackActive = false;
+                            lastExpectedAutoplay = false;
+                            if (autoPlayCheckInterval) {
+                                clearInterval(autoPlayCheckInterval);
+                                autoPlayCheckInterval = null;
+                            }
+                            clearPendingDuration();
+                            if (progressReportInterval) {
+                                clearInterval(progressReportInterval);
+                                progressReportInterval = null;
+                            }
+                            videoCover.classList.remove('hidden');
+                            hideSpinner();
+                            errCode.textContent = 'ERROR DE REPRODUCCIÓN';
+                            errText.textContent = 'No se pudo reproducir este video (posible restricción).';
+                            errorView.classList.add('active');
+                            try {
+                                if (player) player.src = '';
+                                if (ytIframe) ytIframe.src = 'about:blank';
+                            } catch (e) {}
+                            console.log('[X] show_error forzado por el room');
                             break;
                         case 'seek':
                             if (player && typeof data.time !== 'undefined') {
