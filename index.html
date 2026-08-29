@@ -14,114 +14,52 @@
     <link rel="preconnect" href="https://i.ytimg.com" crossorigin="true">
 
     <style>
-        * {
-            box-sizing: border-box;
-        }
-
+        * { box-sizing: border-box; }
         html, body {
-            margin: 0;
-            padding: 0;
-            width: 100%;
-            height: 100%;
-            overflow: hidden;
-            background-color: #000000;
+            margin: 0; padding: 0; width: 100%; height: 100%;
+            overflow: hidden; background-color: #000000;
             font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
             -webkit-font-smoothing: antialiased;
         }
-
         #playerHost {
-            position: relative;
-            width: 100%;
-            height: 100%;
-            display: flex;
-            align-items: center;
-            justify-content: center;
+            position: relative; width: 100%; height: 100%;
+            display: flex; align-items: center; justify-content: center;
             background: #000000;
         }
-
         #rmExternalPlayer {
-            width: 100% !important;
-            height: 100% !important;
-            max-width: none !important;
-            margin: 0 !important;
+            width: 100% !important; height: 100% !important;
+            max-width: none !important; margin: 0 !important;
             --media-font-family: inherit;
         }
-
         .video-cover {
-            position: absolute;
-            inset: 0;
-            background: #000000;
-            z-index: 10;
-            pointer-events: none;
-            opacity: 1;
+            position: absolute; inset: 0; background: #000000;
+            z-index: 10; pointer-events: none; opacity: 1;
             transition: opacity 0.2s ease;
         }
-
-        .video-cover.hidden {
-            opacity: 0 !important;
-        }
-
+        .video-cover.hidden { opacity: 0 !important; }
         .minimal-spinner {
-            position: absolute;
-            z-index: 50;
-            width: 32px;
-            height: 32px;
-            border: 2.5px solid rgba(255, 255, 255, 0.12);
-            border-top-color: #ffffff;
-            border-radius: 50%;
-            animation: spin 0.75s linear infinite;
-            pointer-events: none;
-            display: none;
-            opacity: 0;
+            position: absolute; z-index: 50; width: 32px; height: 32px;
+            border: 2.5px solid rgba(255, 255, 255, 0.12); border-top-color: #ffffff;
+            border-radius: 50%; animation: spin 0.75s linear infinite;
+            pointer-events: none; display: none; opacity: 0;
             transition: opacity 0.2s ease;
         }
-
-        .minimal-spinner.active {
-            display: block !important;
-            opacity: 1 !important;
-        }
-
-        @keyframes spin {
-            to { transform: rotate(360deg); }
-        }
-
+        .minimal-spinner.active { display: block !important; opacity: 1 !important; }
+        @keyframes spin { to { transform: rotate(360deg); } }
         .minimal-error {
-            position: absolute;
-            inset: 0;
-            z-index: 100;
-            background: #000000;
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            justify-content: center;
-            padding: 24px;
-            text-align: center;
-            opacity: 0;
-            pointer-events: none;
+            position: absolute; inset: 0; z-index: 100; background: #000000;
+            display: flex; flex-direction: column; align-items: center; justify-content: center;
+            padding: 24px; text-align: center; opacity: 0; pointer-events: none;
             transition: opacity 0.2s ease;
         }
-
-        .minimal-error.active {
-            opacity: 1 !important;
-            pointer-events: auto !important;
-        }
-
+        .minimal-error.active { opacity: 1 !important; pointer-events: auto !important; }
         .error-tag {
-            font-size: 11px;
-            font-weight: 600;
-            letter-spacing: 1.2px;
-            text-transform: uppercase;
-            color: #777777;
-            margin-bottom: 8px;
+            font-size: 11px; font-weight: 600; letter-spacing: 1.2px;
+            text-transform: uppercase; color: #777777; margin-bottom: 8px;
         }
-
         .error-msg {
-            font-size: 14px;
-            font-weight: 400;
-            color: #e5e5e5;
-            max-width: 320px;
-            line-height: 1.5;
-            margin: 0;
+            font-size: 14px; font-weight: 400; color: #e5e5e5;
+            max-width: 320px; line-height: 1.5; margin: 0;
         }
     </style>
 </head>
@@ -175,14 +113,10 @@
         };
 
         function showSpinner() {
-            if (!hasActiveError && !isRealPlaybackActive) {
-                spinner.classList.add('active');
-            }
+            if (!hasActiveError && !isRealPlaybackActive) spinner.classList.add('active');
         }
 
-        function hideSpinner() {
-            spinner.classList.remove('active');
-        }
+        function hideSpinner() { spinner.classList.remove('active'); }
 
         function triggerError(code) {
             if (hasActiveError) return;
@@ -190,15 +124,9 @@
             isRealPlaybackActive = false;
             lastExpectedAutoplay = false;
 
-            if (autoPlayCheckInterval) {
-                clearInterval(autoPlayCheckInterval);
-                autoPlayCheckInterval = null;
-            }
+            if (autoPlayCheckInterval) { clearInterval(autoPlayCheckInterval); autoPlayCheckInterval = null; }
             clearPendingDuration();
-            if (progressReportInterval) {
-                clearInterval(progressReportInterval);
-                progressReportInterval = null;
-            }
+            if (progressReportInterval) { clearInterval(progressReportInterval); progressReportInterval = null; }
 
             videoCover.classList.remove('hidden');
             hideSpinner();
@@ -208,7 +136,6 @@
 
             errCode.textContent = !isNaN(num) ? `ERROR ${num}` : 'ERROR DE REPRODUCCIÓN';
             errText.textContent = msg;
-
             errorView.classList.add('active');
 
             try {
@@ -216,7 +143,6 @@
                 if (ytIframe) ytIframe.src = 'about:blank';
             } catch (e) {}
 
-            console.error(`[Player Error] Code: ${code} | Video: ${currentVid}`);
             postToParent({ type: 'error', videoId: currentVid, code: code, message: msg });
         }
 
@@ -233,10 +159,7 @@
             if (hasActiveError || isRealPlaybackActive) return;
             isRealPlaybackActive = true;
 
-            if (autoPlayCheckInterval) {
-                clearInterval(autoPlayCheckInterval);
-                autoPlayCheckInterval = null;
-            }
+            if (autoPlayCheckInterval) { clearInterval(autoPlayCheckInterval); autoPlayCheckInterval = null; }
             
             videoCover.classList.add('hidden');
             hideSpinner();
@@ -265,10 +188,7 @@
         }
 
         function clearPendingDuration() {
-            if (pendingDurationTimer) {
-                clearInterval(pendingDurationTimer);
-                pendingDurationTimer = null;
-            }
+            if (pendingDurationTimer) { clearInterval(pendingDurationTimer); pendingDurationTimer = null; }
         }
 
         function startProgressReport() {
@@ -281,16 +201,13 @@
                 }
                 const t = (player && Number(player.currentTime)) || 0;
                 const d = (player && Number(player.duration)) || 0;
-                const rate = (player && Number(player.playbackRate)) || 1.0;
                 try {
                     postToParent({
                         type: 'progress',
                         videoId: currentVid,
                         time: t,
                         duration: d,
-                        playbackRate: rate,
-                        playing: !player.paused,
-                        clientTimestamp: Date.now()
+                        playing: !player.paused
                     });
                 } catch (e) {}
             }, 300);
@@ -306,6 +223,27 @@
                 const p = player.play();
                 if (p && typeof p.catch === 'function') {
                     p.catch(function () {});
+                }
+            } catch (e) {}
+        }
+
+        function forceSeekAudioAndVideo(targetSec) {
+            if (!player) return;
+            try {
+                player.currentTime = targetSec;
+            } catch (e) {}
+
+            // Respaldo directo al iframe interno de YouTube para garantizar sincronía total de audio
+            try {
+                const internalIframe = (ytIframe && ytIframe.contentWindow) 
+                    ? ytIframe 
+                    : player.querySelector('iframe');
+                if (internalIframe && internalIframe.contentWindow) {
+                    internalIframe.contentWindow.postMessage(JSON.stringify({
+                        event: 'command',
+                        func: 'seekTo',
+                        args: [targetSec, true]
+                    }), '*');
                 }
             } catch (e) {}
         }
@@ -346,7 +284,7 @@
                 if (startTime > 0) {
                     const onInitialReady = function () {
                         player.removeEventListener('can-play', onInitialReady);
-                        player.currentTime = startTime;
+                        forceSeekAudioAndVideo(startTime);
                     };
                     player.addEventListener('can-play', onInitialReady);
                 }
@@ -357,11 +295,6 @@
 
             player.addEventListener('playing', function(){ 
                 triggerPlaybackStarted(); 
-                postToParent({ type: 'playing_state', isPlaying: true, videoId: currentVid, time: player.currentTime });
-            });
-
-            player.addEventListener('pause', function(){
-                postToParent({ type: 'playing_state', isPlaying: false, videoId: currentVid, time: player.currentTime });
             });
 
             player.addEventListener('time-update', function() {
@@ -371,9 +304,7 @@
             });
 
             player.addEventListener('waiting', function() {
-                if (!hasActiveError && !isRealPlaybackActive) {
-                    showSpinner();
-                }
+                if (!hasActiveError && !isRealPlaybackActive) showSpinner();
             });
 
             player.addEventListener('error', function(event) {
@@ -401,30 +332,22 @@
                 }
             });
 
-            player.addEventListener('durationchange', function () {
-                reportDurationNow();
-            });
-            player.addEventListener('loaded-metadata', function () {
-                reportDurationNow();
-            });
+            player.addEventListener('durationchange', reportDurationNow);
+            player.addEventListener('loaded-metadata', reportDurationNow);
 
             window.addEventListener('message', function (ev) {
                 if (typeof ev.data === 'string') {
                     if (ev.data.includes('onError')) {
                         try {
                             const ytData = JSON.parse(ev.data);
-                            if (ytData.event === 'onError' && ytData.info) {
-                                triggerError(ytData.info);
-                            }
+                            if (ytData.event === 'onError' && ytData.info) triggerError(ytData.info);
                         } catch (e) {}
                     }
                     if (ev.data.includes('onStateChange') || ev.data.includes('infoDelivery')) {
                         try {
                             const ytData = JSON.parse(ev.data);
                             const state = ytData.info && ytData.info.playerState !== undefined ? ytData.info.playerState : ytData.info;
-                            if (state === 1) {
-                                triggerPlaybackStarted();
-                            }
+                            if (state === 1) triggerPlaybackStarted();
                         } catch (e) {}
                     }
                 }
@@ -444,7 +367,7 @@
                                         try { player.pause(); } catch (e) {}
                                     }
                                     if (typeof data.time !== 'undefined' && Number(data.time) >= 0) {
-                                        player.currentTime = Number(data.time);
+                                        forceSeekAudioAndVideo(Number(data.time));
                                     }
                                     break;
                                 }
@@ -479,7 +402,7 @@
                                     player.removeEventListener('can-play', onCanPlay);
                                     hideSpinner();
                                     if (typeof data.time !== 'undefined' && Number(data.time) >= 0) {
-                                        player.currentTime = Number(data.time);
+                                        forceSeekAudioAndVideo(Number(data.time));
                                     }
                                     reportDurationNow();
                                     if (!reportedReady && currentVid) {
@@ -506,18 +429,9 @@
                             try { player.pause(); } catch (e) {}
                             break;
                         case 'seek':
-                            if (player && typeof data.time !== 'undefined') {
+                            if (typeof data.time !== 'undefined') {
                                 endedReported = false;
-                                player.currentTime = Math.max(0, Number(data.time) || 0);
-                                if (lastExpectedAutoplay && !hasActiveError) {
-                                    safePlay();
-                                }
-                            }
-                            break;
-                        case 'setPlaybackRate':
-                            if (player && typeof data.rate === 'number') {
-                                const clampedRate = Math.max(0.5, Math.min(2.0, data.rate));
-                                player.playbackRate = clampedRate;
+                                forceSeekAudioAndVideo(Math.max(0, Number(data.time) || 0));
                             }
                             break;
                         case 'mute':
