@@ -54,14 +54,13 @@
             z-index: 10;
             pointer-events: none;
             opacity: 1;
-            transition: opacity 0.25s ease;
+            transition: opacity 0.2s ease;
         }
 
         .video-cover.hidden {
             opacity: 0 !important;
         }
 
-        /* --- Spinner Minimalista --- */
         .minimal-spinner {
             position: absolute;
             z-index: 50;
@@ -86,7 +85,6 @@
             to { transform: rotate(360deg); }
         }
 
-        /* --- Error Minimalista --- */
         .minimal-error {
             position: absolute;
             inset: 0;
@@ -129,19 +127,14 @@
 </head>
 <body>
     <div id="playerHost">
-        <!-- Telón negro que cubre la carga -->
         <div id="videoCover" class="video-cover"></div>
-
-        <!-- Spinner -->
         <div id="loadingSpinner" class="minimal-spinner active"></div>
 
-        <!-- Pantalla de Error -->
         <div id="errorView" class="minimal-error">
             <span id="errCode" class="error-tag">ERROR</span>
             <p id="errText" class="error-msg">No se pudo reproducir este video.</p>
         </div>
 
-        <!-- Reproductor Vidstack -->
         <media-player id="rmExternalPlayer" class="vds-player" load="eager" view-type="video" stream-type="on-demand" log-level="silent" crossorigin="" playsinline="" data-media-player="" tabindex="0" role="region" aria-label="Video Player" poster="data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7">
             <media-provider keep-alive="" data-media-provider="">
                 <iframe id="ytIframe" tabindex="-1" data-no-controls="" class="vds-youtube" aria-hidden="true" frameborder="0" allow="autoplay; fullscreen; encrypted-media; picture-in-picture; accelerometer; gyroscope"></iframe>
@@ -157,14 +150,12 @@
         const player = document.getElementById('rmExternalPlayer');
         const ytIframe = document.getElementById('ytIframe');
 
-        // Elementos UI
         const videoCover = document.getElementById('videoCover');
         const spinner = document.getElementById('loadingSpinner');
         const errorView = document.getElementById('errorView');
         const errCode = document.getElementById('errCode');
         const errText = document.getElementById('errText');
 
-        // Estados
         let hasActiveError = false;
         let isRealPlaybackActive = false;
         let currentVid = videoId || null;
@@ -247,7 +238,6 @@
                 autoPlayCheckInterval = null;
             }
             
-            // Destapar el video y ocultar spinner
             videoCover.classList.add('hidden');
             hideSpinner();
             errorView.classList.remove('active');
@@ -268,7 +258,7 @@
                         postToParent({ type: 'duration', videoId: currentVid, duration: d });
                         clearPendingDuration();
                     }
-                }, 500);
+                }, 400);
             }
 
             startProgressReport();
@@ -291,10 +281,19 @@
                 }
                 const t = (player && Number(player.currentTime)) || 0;
                 const d = (player && Number(player.duration)) || 0;
+                const rate = (player && Number(player.playbackRate)) || 1.0;
                 try {
-                    postToParent({ type: 'progress', videoId: currentVid, time: t, duration: d, playing: !player.paused });
+                    postToParent({
+                        type: 'progress',
+                        videoId: currentVid,
+                        time: t,
+                        duration: d,
+                        playbackRate: rate,
+                        playing: !player.paused,
+                        clientTimestamp: Date.now()
+                    });
                 } catch (e) {}
-            }, 1000);
+            }, 300);
         }
 
         function postToParent(m) {
@@ -322,7 +321,7 @@
                 if (lastExpectedAutoplay && player && player.paused) {
                     safePlay();
                 }
-            }, 800);
+            }, 600);
         }
 
         if (player) {
@@ -356,10 +355,13 @@
                 hideSpinner();
             }
 
-            // Eventos nativos de Vidstack
             player.addEventListener('playing', function(){ 
-                console.log('[X] playing, ct=', player.currentTime, 'vid=', currentVid); 
                 triggerPlaybackStarted(); 
+                postToParent({ type: 'playing_state', isPlaying: true, videoId: currentVid, time: player.currentTime });
+            });
+
+            player.addEventListener('pause', function(){
+                postToParent({ type: 'playing_state', isPlaying: false, videoId: currentVid, time: player.currentTime });
             });
 
             player.addEventListener('time-update', function() {
@@ -382,7 +384,6 @@
 
             player.addEventListener('ended', function () {
                 if (!endedReported) {
-                    console.log('[X] ENDED fired, currentTime=', player.currentTime, 'duration=', player.duration, 'vid=', currentVid);
                     endedReported = true;
                     isRealPlaybackActive = false;
                     lastExpectedAutoplay = false;
@@ -407,7 +408,6 @@
                 reportDurationNow();
             });
 
-            // Escucha directa de mensajes
             window.addEventListener('message', function (ev) {
                 if (typeof ev.data === 'string') {
                     if (ev.data.includes('onError')) {
@@ -422,7 +422,7 @@
                         try {
                             const ytData = JSON.parse(ev.data);
                             const state = ytData.info && ytData.info.playerState !== undefined ? ytData.info.playerState : ytData.info;
-                            if (state === 1) { // PLAYING
+                            if (state === 1) {
                                 triggerPlaybackStarted();
                             }
                         } catch (e) {}
@@ -435,9 +435,6 @@
                     switch (data.type) {
                         case 'load':
                             if (data.videoId) {
-                                console.log('[X] LOAD', data.videoId, 'autoplay=', data.autoplay, 'time=', data.time);
-                                
-                                // Si ya es el mismo video inicializándose y sin error, no reiniciar el iframe de YouTube
                                 if (currentVid === data.videoId && !hasActiveError && player.src) {
                                     if (data.autoplay) {
                                         lastExpectedAutoplay = true;
@@ -446,7 +443,7 @@
                                         lastExpectedAutoplay = false;
                                         try { player.pause(); } catch (e) {}
                                     }
-                                    if (typeof data.time !== 'undefined' && Number(data.time) > 0) {
+                                    if (typeof data.time !== 'undefined' && Number(data.time) >= 0) {
                                         player.currentTime = Number(data.time);
                                     }
                                     break;
@@ -481,7 +478,7 @@
                                 const onCanPlay = function () {
                                     player.removeEventListener('can-play', onCanPlay);
                                     hideSpinner();
-                                    if (typeof data.time !== 'undefined' && Number(data.time) > 0) {
+                                    if (typeof data.time !== 'undefined' && Number(data.time) >= 0) {
                                         player.currentTime = Number(data.time);
                                     }
                                     reportDurationNow();
@@ -511,13 +508,16 @@
                         case 'seek':
                             if (player && typeof data.time !== 'undefined') {
                                 endedReported = false;
-                                isRealPlaybackActive = false;
-                                player.currentTime = Number(data.time) || 0;
-                                clearPendingDuration();
+                                player.currentTime = Math.max(0, Number(data.time) || 0);
                                 if (lastExpectedAutoplay && !hasActiveError) {
                                     safePlay();
                                 }
-                                startAutoplayWatchdog();
+                            }
+                            break;
+                        case 'setPlaybackRate':
+                            if (player && typeof data.rate === 'number') {
+                                const clampedRate = Math.max(0.5, Math.min(2.0, data.rate));
+                                player.playbackRate = clampedRate;
                             }
                             break;
                         case 'mute':
