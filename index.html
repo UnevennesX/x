@@ -233,7 +233,6 @@
                 player.currentTime = targetSec;
             } catch (e) {}
 
-            // Respaldo directo al iframe interno de YouTube para garantizar sincronía total de audio
             try {
                 const internalIframe = (ytIframe && ytIframe.contentWindow) 
                     ? ytIframe 
