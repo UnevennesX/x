@@ -103,6 +103,7 @@
         let autoPlayCheckInterval = null;
         let pendingDurationTimer = null;
         let progressReportInterval = null;
+        let externalEndedVideoId = null;
 
         const ERRORS_MAP = {
             150: 'El contenido tiene restricciones de derechos de autor o el autor bloqueó su reproducción externa.',
@@ -157,6 +158,7 @@
 
         function triggerPlaybackStarted() {
             if (hasActiveError || isRealPlaybackActive) return;
+            if (endedReported && externalEndedVideoId === currentVid) return;
             isRealPlaybackActive = true;
 
             if (autoPlayCheckInterval) { clearInterval(autoPlayCheckInterval); autoPlayCheckInterval = null; }
@@ -194,7 +196,7 @@
         function startProgressReport() {
             if (progressReportInterval) clearInterval(progressReportInterval);
             progressReportInterval = setInterval(function () {
-                if (!isRealPlaybackActive || hasActiveError) {
+                if (!isRealPlaybackActive || hasActiveError || endedReported) {
                     clearInterval(progressReportInterval);
                     progressReportInterval = null;
                     return;
@@ -293,10 +295,17 @@
             }
 
             player.addEventListener('playing', function(){ 
+                if (endedReported && externalEndedVideoId === currentVid) {
+                    try { player.pause(); } catch(e) {}
+                    return;
+                }
                 triggerPlaybackStarted(); 
             });
 
             player.addEventListener('time-update', function() {
+                if (endedReported && externalEndedVideoId === currentVid) {
+                    return;
+                }
                 if (!isRealPlaybackActive && player.currentTime > 0) {
                     triggerPlaybackStarted();
                 }
@@ -315,6 +324,7 @@
             player.addEventListener('ended', function () {
                 if (!endedReported) {
                     endedReported = true;
+                    externalEndedVideoId = currentVid;
                     isRealPlaybackActive = false;
                     lastExpectedAutoplay = false;
                     clearPendingDuration();
@@ -327,6 +337,7 @@
                         autoPlayCheckInterval = null;
                     }
                     try { player.pause(); } catch (e) {}
+                    try { player.currentTime = player.duration; } catch (e) {}
                     postToParent({ type: 'ended', videoId: currentVid });
                 }
             });
@@ -371,9 +382,11 @@
                                     break;
                                 }
 
-                                hasActiveError = false;
-                                isRealPlaybackActive = false;
-                                clearPendingDuration();
+                                 hasActiveError = false;
+                                 isRealPlaybackActive = false;
+                                 endedReported = false;
+                                 externalEndedVideoId = null;
+                                 clearPendingDuration();
                                 if (progressReportInterval) {
                                     clearInterval(progressReportInterval);
                                     progressReportInterval = null;
@@ -382,9 +395,10 @@
                                 videoCover.classList.remove('hidden');
                                 errorView.classList.remove('active');
                                 
-                                currentVid = data.videoId;
-                                endedReported = false;
-                                reportedReady = false;
+                                 currentVid = data.videoId;
+                                 endedReported = false;
+                                 externalEndedVideoId = null;
+                                 reportedReady = false;
                                 
                                 showSpinner();
                                 player.src = 'youtube/' + data.videoId;
