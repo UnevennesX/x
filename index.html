@@ -97,15 +97,9 @@
         let hasActiveError = false;
         let isRealPlaybackActive = false;
         let currentVid = videoId || null;
-        let lastExpectedAutoplay = autoplay === '1';
         let endedReported = false;
         let reportedReady = false;
-        let autoPlayCheckInterval = null;
-        let pendingDurationTimer = null;
         let progressReportInterval = null;
-        let externalEndedVideoId = null;
-        let playAttemptTimeout = null;
-        let playAttemptStartTime = 0;
 
         const ERRORS_MAP = {
             150: 'El contenido tiene restricciones de derechos de autor o el autor bloqueó su reproducción externa.',
@@ -125,10 +119,7 @@
             if (hasActiveError) return;
             hasActiveError = true;
             isRealPlaybackActive = false;
-            lastExpectedAutoplay = false;
 
-            if (autoPlayCheckInterval) { clearInterval(autoPlayCheckInterval); autoPlayCheckInterval = null; }
-            clearPendingDuration();
             if (progressReportInterval) { clearInterval(progressReportInterval); progressReportInterval = null; }
 
             videoCover.classList.remove('hidden');
@@ -140,11 +131,6 @@
             errCode.textContent = !isNaN(num) ? `ERROR ${num}` : 'ERROR DE REPRODUCCIÓN';
             errText.textContent = msg;
             errorView.classList.add('active');
-
-            try {
-                if (player) player.src = '';
-                if (ytIframe) ytIframe.src = 'about:blank';
-            } catch (e) {}
 
             postToParent({ type: 'error', videoId: currentVid, code: code, message: msg });
         }
@@ -160,15 +146,10 @@
 
         function triggerPlaybackStarted() {
             if (hasActiveError || isRealPlaybackActive) return;
-            if (endedReported && externalEndedVideoId === currentVid && lastExpectedAutoplay) {
+            if (endedReported) {
                 endedReported = false;
-                externalEndedVideoId = null;
             }
-            if (endedReported && externalEndedVideoId === currentVid) return;
             isRealPlaybackActive = true;
-
-            if (playAttemptTimeout) { clearTimeout(playAttemptTimeout); playAttemptTimeout = null; }
-            if (autoPlayCheckInterval) { clearInterval(autoPlayCheckInterval); autoPlayCheckInterval = null; }
             
             videoCover.classList.add('hidden');
             hideSpinner();
@@ -182,22 +163,9 @@
                 postToParent({ type: 'ready', videoId: currentVid, duration: dur, time: pos });
             }
 
-            if (dur === 0 && !pendingDurationTimer) {
-                pendingDurationTimer = setInterval(function () {
-                    if (hasActiveError) { clearPendingDuration(); return; }
-                    const d = (player && Number(player.duration) > 0) ? Number(player.duration) : 0;
-                    if (d > 0) {
-                        postToParent({ type: 'duration', videoId: currentVid, duration: d });
-                        clearPendingDuration();
-                    }
-                }, 400);
-            }
+            startProgressReport();
 
             startProgressReport();
-        }
-
-        function clearPendingDuration() {
-            if (pendingDurationTimer) { clearInterval(pendingDurationTimer); pendingDurationTimer = null; }
         }
 
         function startProgressReport() {
@@ -210,15 +178,13 @@
                 }
                 const t = (player && Number(player.currentTime)) || 0;
                 const d = (player && Number(player.duration)) || 0;
-                try {
-                    postToParent({
-                        type: 'progress',
-                        videoId: currentVid,
-                        time: t,
-                        duration: d,
-                        playing: !player.paused
-                    });
-                } catch (e) {}
+                postToParent({
+                    type: 'progress',
+                    videoId: currentVid,
+                    time: t,
+                    duration: d,
+                    playing: !player.paused
+                });
             }, 300);
         }
 
@@ -228,13 +194,6 @@
 
         function safePlay() {
             if (!player || hasActiveError) return;
-            if (playAttemptTimeout) clearTimeout(playAttemptTimeout);
-            playAttemptStartTime = Date.now();
-            playAttemptTimeout = setTimeout(function() {
-                if (!isRealPlaybackActive && !hasActiveError) {
-                    hideSpinner();
-                }
-            }, 5000);
             try {
                 const p = player.play();
                 if (p && typeof p.catch === 'function') {
@@ -263,20 +222,6 @@
             } catch (e) {}
         }
 
-        function startAutoplayWatchdog() {
-            if (autoPlayCheckInterval) clearInterval(autoPlayCheckInterval);
-            autoPlayCheckInterval = setInterval(function () {
-                if (hasActiveError || isRealPlaybackActive) {
-                    clearInterval(autoPlayCheckInterval);
-                    autoPlayCheckInterval = null;
-                    return;
-                }
-                if (lastExpectedAutoplay === true && player && player.paused && !endedReported) {
-                    safePlay();
-                }
-            }, 600);
-        }
-
         if (player) {
             if (autoplay !== '1') player.removeAttribute('autoplay');
 
@@ -294,7 +239,7 @@
                 player.src = 'youtube/' + videoId;
                 if (autoplay === '1') {
                     player.setAttribute('autoplay', '');
-                    lastExpectedAutoplay = true;
+                    safePlay();
                 }
                 if (startTime > 0) {
                     const onInitialReady = function () {
@@ -303,7 +248,6 @@
                     };
                     player.addEventListener('can-play', onInitialReady);
                 }
-                startAutoplayWatchdog();
             } else {
                 hideSpinner();
             }
@@ -338,20 +282,12 @@
             player.addEventListener('ended', function () {
                 if (!endedReported) {
                     endedReported = true;
-                    externalEndedVideoId = currentVid;
                     isRealPlaybackActive = false;
-                    lastExpectedAutoplay = false;
-                    clearPendingDuration();
                     if (progressReportInterval) {
                         clearInterval(progressReportInterval);
                         progressReportInterval = null;
                     }
-                    if (autoPlayCheckInterval) {
-                        clearInterval(autoPlayCheckInterval);
-                        autoPlayCheckInterval = null;
-                    }
                     try { player.pause(); } catch (e) {}
-                    try { player.currentTime = player.duration; } catch (e) {}
                     postToParent({ type: 'ended', videoId: currentVid });
                 }
             });
@@ -383,15 +319,10 @@
                         case 'load':
                             if (data.videoId) {
                                 if (currentVid === data.videoId && !hasActiveError && player.src) {
-                                    if (endedReported && externalEndedVideoId === currentVid) {
-                                        endedReported = false;
-                                        externalEndedVideoId = null;
-                                    }
+                                    endedReported = false;
                                     if (data.autoplay) {
-                                        lastExpectedAutoplay = true;
                                         safePlay();
                                     } else {
-                                        lastExpectedAutoplay = false;
                                         try { player.pause(); } catch (e) {}
                                     }
                                     if (typeof data.time !== 'undefined' && Number(data.time) >= 0) {
@@ -400,11 +331,10 @@
                                     break;
                                 }
 
-                                 hasActiveError = false;
-                                 isRealPlaybackActive = false;
-                                 endedReported = false;
-                                 externalEndedVideoId = null;
-                                 clearPendingDuration();
+                                hasActiveError = false;
+                                isRealPlaybackActive = false;
+                                endedReported = false;
+                                reportedReady = false;
                                 if (progressReportInterval) {
                                     clearInterval(progressReportInterval);
                                     progressReportInterval = null;
@@ -413,20 +343,16 @@
                                 videoCover.classList.remove('hidden');
                                 errorView.classList.remove('active');
                                 
-                                 currentVid = data.videoId;
-                                 endedReported = false;
-                                 externalEndedVideoId = null;
-                                 reportedReady = false;
+                                currentVid = data.videoId;
+                                reportedReady = false;
                                 
                                 showSpinner();
                                 player.src = 'youtube/' + data.videoId;
 
                                 if (data.autoplay) {
                                     player.setAttribute('autoplay', '');
-                                    lastExpectedAutoplay = true;
                                 } else {
                                     player.removeAttribute('autoplay');
-                                    lastExpectedAutoplay = false;
                                 }
 
                                 const onCanPlay = function () {
@@ -440,31 +366,21 @@
                                         reportedReady = true;
                                         postToParent({ type: 'ready', videoId: currentVid, duration: Number(player.duration) || 0, time: Number(player.currentTime) || 0 });
                                     }
-                                    if (lastExpectedAutoplay && !hasActiveError) {
+                                    if (data.autoplay && !hasActiveError) {
                                         safePlay();
                                     }
                                 };
                                 player.addEventListener('can-play', onCanPlay);
-                                startAutoplayWatchdog();
                             }
                             break;
                         case 'play':
                             if (!hasActiveError) {
-                                lastExpectedAutoplay = true;
-                                if (endedReported && externalEndedVideoId === currentVid) {
-                                    endedReported = false;
-                                    externalEndedVideoId = null;
-                                }
+                                endedReported = false;
                                 safePlay();
                             }
                             break;
                         case 'pause':
                         case 'stop':
-                            lastExpectedAutoplay = false;
-                            if (autoPlayCheckInterval) {
-                                clearInterval(autoPlayCheckInterval);
-                                autoPlayCheckInterval = null;
-                            }
                             try { player.pause(); } catch (e) {}
                             break;
                         case 'seek':
