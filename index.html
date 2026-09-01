@@ -192,7 +192,7 @@
                 const timeChanged = Math.abs(t - lastReportedTime) > 1.0;
                 const stateChanged = playing !== lastReportedState;
 
-                if (timeChanged || stateChanged || !isRealPlaybackActive) {
+                if (timeChanged || stateChanged) {
                     lastReportedTime = Math.floor(t);
                     lastReportedState = playing;
                     postToParent({
@@ -356,7 +356,6 @@
                                 console.log('[Player] Loading video:', data.videoId, 'autoplay:', data.autoplay);
                                 
                                 showSpinner();
-                                hideLoadingState();
                                 player.src = 'youtube/' + data.videoId;
 
                                 if (data.autoplay) {
