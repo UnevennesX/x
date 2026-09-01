@@ -384,7 +384,15 @@
                         case 'play':
                             if (!hasActiveError) {
                                 endedReported = false;
+                                lastReportedState = true;
                                 safePlay();
+                                postToParent({
+                                    type: 'progress',
+                                    videoId: currentVid,
+                                    time: Number(player.currentTime) || 0,
+                                    duration: Number(player.duration) || 0,
+                                    playing: true
+                                });
                             }
                             break;
                         case 'pause':
