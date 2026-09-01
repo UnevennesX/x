@@ -244,9 +244,6 @@
             if (autoplay !== '1') player.removeAttribute('autoplay');
 
             player.addEventListener('can-play', function () {
-                if (!isRealPlaybackActive) {
-                    hideSpinner();
-                }
             });
 
             if (videoId) {
@@ -279,7 +276,9 @@
             });
 
             player.addEventListener('waiting', function() {
-                showSpinner();
+                if (!isRealPlaybackActive) {
+                    showSpinner();
+                }
             });
 
             player.addEventListener('error', function(event) {
@@ -368,9 +367,6 @@
 
                                 const onCanPlay = function () {
                                     player.removeEventListener('can-play', onCanPlay);
-                                    if (!isRealPlaybackActive) {
-                                        hideSpinner();
-                                    }
                                     if (typeof data.time !== 'undefined' && Number(data.time) >= 0) {
                                         forceSeekAudioAndVideo(Number(data.time));
                                     }
