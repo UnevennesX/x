@@ -104,6 +104,8 @@
         let pendingDurationTimer = null;
         let progressReportInterval = null;
         let externalEndedVideoId = null;
+        let playAttemptTimeout = null;
+        let playAttemptStartTime = 0;
 
         const ERRORS_MAP = {
             150: 'El contenido tiene restricciones de derechos de autor o el autor bloqueó su reproducción externa.',
@@ -158,9 +160,14 @@
 
         function triggerPlaybackStarted() {
             if (hasActiveError || isRealPlaybackActive) return;
+            if (endedReported && externalEndedVideoId === currentVid && lastExpectedAutoplay) {
+                endedReported = false;
+                externalEndedVideoId = null;
+            }
             if (endedReported && externalEndedVideoId === currentVid) return;
             isRealPlaybackActive = true;
 
+            if (playAttemptTimeout) { clearTimeout(playAttemptTimeout); playAttemptTimeout = null; }
             if (autoPlayCheckInterval) { clearInterval(autoPlayCheckInterval); autoPlayCheckInterval = null; }
             
             videoCover.classList.add('hidden');
@@ -221,6 +228,13 @@
 
         function safePlay() {
             if (!player || hasActiveError) return;
+            if (playAttemptTimeout) clearTimeout(playAttemptTimeout);
+            playAttemptStartTime = Date.now();
+            playAttemptTimeout = setTimeout(function() {
+                if (!isRealPlaybackActive && !hasActiveError) {
+                    hideSpinner();
+                }
+            }, 5000);
             try {
                 const p = player.play();
                 if (p && typeof p.catch === 'function') {
@@ -369,6 +383,10 @@
                         case 'load':
                             if (data.videoId) {
                                 if (currentVid === data.videoId && !hasActiveError && player.src) {
+                                    if (endedReported && externalEndedVideoId === currentVid) {
+                                        endedReported = false;
+                                        externalEndedVideoId = null;
+                                    }
                                     if (data.autoplay) {
                                         lastExpectedAutoplay = true;
                                         safePlay();
@@ -433,6 +451,10 @@
                         case 'play':
                             if (!hasActiveError) {
                                 lastExpectedAutoplay = true;
+                                if (endedReported && externalEndedVideoId === currentVid) {
+                                    endedReported = false;
+                                    externalEndedVideoId = null;
+                                }
                                 safePlay();
                             }
                             break;
