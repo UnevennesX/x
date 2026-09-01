@@ -112,10 +112,13 @@
         };
 
         function showSpinner() {
-            if (!hasActiveError && !isRealPlaybackActive) spinner.classList.add('active');
+            if (hasActiveError || isRealPlaybackActive) return;
+            spinner.classList.add('active');
         }
 
-        function hideSpinner() { spinner.classList.remove('active'); }
+        function hideSpinner() { 
+            spinner.classList.remove('active'); 
+        }
 
         function triggerError(code) {
             if (hasActiveError) return;
@@ -148,14 +151,17 @@
 
         function triggerPlaybackStarted() {
             if (hasActiveError) return;
+            
+            const wasAlreadyActive = isRealPlaybackActive;
+            
             if (endedReported) {
                 endedReported = false;
             }
             isRealPlaybackActive = true;
             lastReportedState = true;
             
-            videoCover.classList.add('hidden');
             hideSpinner();
+            videoCover.classList.add('hidden');
             errorView.classList.remove('active');
 
             const dur = (player && Number(player.duration) > 0) ? Number(player.duration) : 0;
@@ -166,7 +172,9 @@
                 postToParent({ type: 'ready', videoId: currentVid, duration: dur, time: pos });
             }
 
-            startProgressReport();
+            if (!wasAlreadyActive) {
+                startProgressReport();
+            }
         }
 
         function startProgressReport() {
@@ -236,10 +244,8 @@
             if (autoplay !== '1') player.removeAttribute('autoplay');
 
             player.addEventListener('can-play', function () {
-                hideSpinner();
-                if (!reportedReady && currentVid) {
-                    reportedReady = true;
-                    postToParent({ type: 'ready', videoId: currentVid, duration: Number(player.duration) || 0, time: Number(player.currentTime) || 0 });
+                if (!isRealPlaybackActive) {
+                    hideSpinner();
                 }
             });
 
@@ -273,7 +279,7 @@
             });
 
             player.addEventListener('waiting', function() {
-                if (!hasActiveError && !isRealPlaybackActive) showSpinner();
+                showSpinner();
             });
 
             player.addEventListener('error', function(event) {
@@ -347,11 +353,11 @@
                                 errorView.classList.remove('active');
                                 
                                 currentVid = data.videoId;
-                                reportedReady = false;
                                 
                                 console.log('[Player] Loading video:', data.videoId, 'autoplay:', data.autoplay);
                                 
                                 showSpinner();
+                                hideLoadingState();
                                 player.src = 'youtube/' + data.videoId;
 
                                 if (data.autoplay) {
@@ -362,7 +368,9 @@
 
                                 const onCanPlay = function () {
                                     player.removeEventListener('can-play', onCanPlay);
-                                    hideSpinner();
+                                    if (!isRealPlaybackActive) {
+                                        hideSpinner();
+                                    }
                                     if (typeof data.time !== 'undefined' && Number(data.time) >= 0) {
                                         forceSeekAudioAndVideo(Number(data.time));
                                     }
