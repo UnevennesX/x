@@ -257,7 +257,7 @@
                     autoPlayCheckInterval = null;
                     return;
                 }
-                if (lastExpectedAutoplay && player && player.paused) {
+                if (lastExpectedAutoplay === true && player && player.paused && !endedReported) {
                     safePlay();
                 }
             }, 600);
@@ -439,6 +439,10 @@
                         case 'pause':
                         case 'stop':
                             lastExpectedAutoplay = false;
+                            if (autoPlayCheckInterval) {
+                                clearInterval(autoPlayCheckInterval);
+                                autoPlayCheckInterval = null;
+                            }
                             try { player.pause(); } catch (e) {}
                             break;
                         case 'seek':
