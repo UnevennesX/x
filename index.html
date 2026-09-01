@@ -145,7 +145,7 @@
         }
 
         function triggerPlaybackStarted() {
-            if (hasActiveError) return;
+            if (hasActiveError || isRealPlaybackActive) return;
             if (endedReported) {
                 endedReported = false;
             }
@@ -344,6 +344,8 @@
                                 currentVid = data.videoId;
                                 reportedReady = false;
                                 
+                                console.log('[Player] Loading video:', data.videoId, 'autoplay:', data.autoplay);
+                                
                                 showSpinner();
                                 player.src = 'youtube/' + data.videoId;
 
@@ -369,17 +371,6 @@
                                     }
                                 };
                                 player.addEventListener('can-play', onCanPlay);
-                                
-                                // Fallback: report ready after 3s if not already reported
-                                setTimeout(function() {
-                                    if (!reportedReady && currentVid && player.src) {
-                                        reportedReady = true;
-                                        const dur = Number(player.duration) || 0;
-                                        const pos = Number(player.currentTime) || 0;
-                                        postToParent({ type: 'ready', videoId: currentVid, duration: dur, time: pos });
-                                        hideSpinner();
-                                    }
-                                }, 3000);
                             }
                             break;
                         case 'play':
