@@ -100,6 +100,8 @@
         let endedReported = false;
         let reportedReady = false;
         let progressReportInterval = null;
+        let lastReportedTime = -1;
+        let lastReportedState = null;
 
         const ERRORS_MAP = {
             150: 'El contenido tiene restricciones de derechos de autor o el autor bloqueó su reproducción externa.',
@@ -145,11 +147,12 @@
         }
 
         function triggerPlaybackStarted() {
-            if (hasActiveError || isRealPlaybackActive) return;
+            if (hasActiveError) return;
             if (endedReported) {
                 endedReported = false;
             }
             isRealPlaybackActive = true;
+            lastReportedState = true;
             
             videoCover.classList.add('hidden');
             hideSpinner();
@@ -169,21 +172,30 @@
         function startProgressReport() {
             if (progressReportInterval) clearInterval(progressReportInterval);
             progressReportInterval = setInterval(function () {
-                if (!isRealPlaybackActive || hasActiveError || endedReported) {
+                if (hasActiveError || endedReported) {
                     clearInterval(progressReportInterval);
                     progressReportInterval = null;
                     return;
                 }
                 const t = (player && Number(player.currentTime)) || 0;
                 const d = (player && Number(player.duration)) || 0;
-                postToParent({
-                    type: 'progress',
-                    videoId: currentVid,
-                    time: t,
-                    duration: d,
-                    playing: !player.paused
-                });
-            }, 300);
+                const playing = !player.paused;
+
+                const timeChanged = Math.abs(t - lastReportedTime) > 1.0;
+                const stateChanged = playing !== lastReportedState;
+
+                if (timeChanged || stateChanged || !isRealPlaybackActive) {
+                    lastReportedTime = Math.floor(t);
+                    lastReportedState = playing;
+                    postToParent({
+                        type: 'progress',
+                        videoId: currentVid,
+                        time: t,
+                        duration: d,
+                        playing: playing
+                    });
+                }
+            }, 500);
         }
 
         function postToParent(m) {
@@ -251,17 +263,10 @@
             }
 
             player.addEventListener('playing', function(){ 
-                if (endedReported && externalEndedVideoId === currentVid) {
-                    try { player.pause(); } catch(e) {}
-                    return;
-                }
                 triggerPlaybackStarted(); 
             });
 
             player.addEventListener('time-update', function() {
-                if (endedReported && externalEndedVideoId === currentVid) {
-                    return;
-                }
                 if (!isRealPlaybackActive && player.currentTime > 0) {
                     triggerPlaybackStarted();
                 }
@@ -381,7 +386,20 @@
                             break;
                         case 'pause':
                         case 'stop':
-                            try { player.pause(); } catch (e) {}
+                            try { 
+                                player.pause();
+                                if (isRealPlaybackActive) {
+                                    isRealPlaybackActive = false;
+                                    lastReportedState = false;
+                                    postToParent({
+                                        type: 'progress',
+                                        videoId: currentVid,
+                                        time: Number(player.currentTime) || 0,
+                                        duration: Number(player.duration) || 0,
+                                        playing: false
+                                    });
+                                }
+                            } catch (e) {}
                             break;
                         case 'seek':
                             if (typeof data.time !== 'undefined') {
