@@ -399,17 +399,15 @@
                         case 'stop':
                             try { 
                                 player.pause();
-                                if (isRealPlaybackActive) {
-                                    isRealPlaybackActive = false;
-                                    lastReportedState = false;
-                                    postToParent({
-                                        type: 'progress',
-                                        videoId: currentVid,
-                                        time: Number(player.currentTime) || 0,
-                                        duration: Number(player.duration) || 0,
-                                        playing: false
-                                    });
-                                }
+                                isRealPlaybackActive = false;
+                                lastReportedState = false;
+                                postToParent({
+                                    type: 'progress',
+                                    videoId: currentVid,
+                                    time: Number(player.currentTime) || 0,
+                                    duration: Number(player.duration) || 0,
+                                    playing: false
+                                });
                             } catch (e) {}
                             break;
                         case 'seek':
