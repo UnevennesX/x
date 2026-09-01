@@ -189,11 +189,11 @@
                 const d = (player && Number(player.duration)) || 0;
                 const playing = !player.paused;
 
-                const timeChanged = Math.abs(t - lastReportedTime) > 1.0;
+                const timeChanged = Math.abs(t - lastReportedTime) > 0.5;
                 const stateChanged = playing !== lastReportedState;
 
                 if (timeChanged || stateChanged) {
-                    lastReportedTime = Math.floor(t);
+                    lastReportedTime = Math.floor(t * 2) / 2;
                     lastReportedState = playing;
                     postToParent({
                         type: 'progress',
@@ -203,7 +203,7 @@
                         playing: playing
                     });
                 }
-            }, 500);
+            }, 250);
         }
 
         function postToParent(m) {
