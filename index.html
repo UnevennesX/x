@@ -102,6 +102,9 @@
         let progressReportInterval = null;
         let lastReportedTime = -1;
         let lastReportedState = null;
+        let autoplayBlocked = false;
+        let pendingAutoplay = false;
+        let wantsAutoplay = autoplay === '1';
 
         const ERRORS_MAP = {
             150: 'El contenido tiene restricciones de derechos de autor o el autor bloqueó su reproducción externa.',
@@ -215,9 +218,29 @@
             try {
                 const p = player.play();
                 if (p && typeof p.catch === 'function') {
-                    p.catch(function () {});
+                    p.catch(function (err) {
+                        autoplayBlocked = true;
+                        pendingAutoplay = true;
+                        console.log('[Player] Autoplay blocked, will retry on visibility change');
+                        postToParent({ 
+                            type: 'autoplay_blocked', 
+                            videoId: currentVid,
+                            message: 'Autoplay bloqueado por el navegador'
+                        });
+                    });
                 }
-            } catch (e) {}
+            } catch (e) {
+                autoplayBlocked = true;
+                pendingAutoplay = true;
+            }
+        }
+
+        function attemptAutoplay() {
+            if (!document.hidden && pendingAutoplay && wantsAutoplay && !hasActiveError) {
+                pendingAutoplay = false;
+                autoplayBlocked = false;
+                safePlay();
+            }
         }
 
         function forceSeekAudioAndVideo(targetSec) {
@@ -241,7 +264,12 @@
         }
 
         if (player) {
-            if (autoplay !== '1') player.removeAttribute('autoplay');
+            if (autoplay !== '1') {
+                player.removeAttribute('autoplay');
+                wantsAutoplay = false;
+            } else {
+                wantsAutoplay = true;
+            }
 
             player.addEventListener('can-play', function () {
             });
@@ -252,7 +280,6 @@
                 player.src = 'youtube/' + videoId;
                 if (autoplay === '1') {
                     player.setAttribute('autoplay', '');
-                    safePlay();
                 }
                 if (startTime > 0) {
                     const onInitialReady = function () {
@@ -261,6 +288,16 @@
                     };
                     player.addEventListener('can-play', onInitialReady);
                 }
+                
+                const onInitialCanPlay = function () {
+                    player.removeEventListener('can-play', onInitialCanPlay);
+                    if (autoplay === '1' && !document.hidden) {
+                        safePlay();
+                    } else if (autoplay === '1' && document.hidden) {
+                        pendingAutoplay = true;
+                    }
+                };
+                player.addEventListener('can-play', onInitialCanPlay);
             } else {
                 hideSpinner();
             }
@@ -303,6 +340,12 @@
             player.addEventListener('durationchange', reportDurationNow);
             player.addEventListener('loaded-metadata', reportDurationNow);
 
+            document.addEventListener('visibilitychange', function () {
+                if (!document.hidden) {
+                    attemptAutoplay();
+                }
+            });
+
             window.addEventListener('message', function (ev) {
                 if (typeof ev.data === 'string') {
                     if (ev.data.includes('onError')) {
@@ -329,6 +372,7 @@
                                 if (currentVid === data.videoId && !hasActiveError && player.src) {
                                     endedReported = false;
                                     if (data.autoplay) {
+                                        wantsAutoplay = true;
                                         safePlay();
                                     } else {
                                         try { player.pause(); } catch (e) {}
@@ -343,6 +387,9 @@
                                 isRealPlaybackActive = false;
                                 endedReported = false;
                                 reportedReady = false;
+                                autoplayBlocked = false;
+                                pendingAutoplay = false;
+                                wantsAutoplay = !!data.autoplay;
                                 if (progressReportInterval) {
                                     clearInterval(progressReportInterval);
                                     progressReportInterval = null;
@@ -374,8 +421,10 @@
                                         reportedReady = true;
                                         postToParent({ type: 'ready', videoId: currentVid, duration: Number(player.duration) || 0, time: Number(player.currentTime) || 0 });
                                     }
-                                    if (data.autoplay && !hasActiveError) {
+                                    if (data.autoplay && !hasActiveError && !document.hidden) {
                                         safePlay();
+                                    } else if (data.autoplay && document.hidden) {
+                                        pendingAutoplay = true;
                                     }
                                 };
                                 player.addEventListener('can-play', onCanPlay);
@@ -385,7 +434,12 @@
                             if (!hasActiveError) {
                                 endedReported = false;
                                 lastReportedState = true;
-                                safePlay();
+                                wantsAutoplay = true;
+                                if (!document.hidden) {
+                                    safePlay();
+                                } else {
+                                    pendingAutoplay = true;
+                                }
                                 postToParent({
                                     type: 'progress',
                                     videoId: currentVid,
