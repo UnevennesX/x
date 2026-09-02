@@ -152,6 +152,14 @@
             return false;
         }
 
+        function reportReady() {
+            if (reportedReady) return;
+            reportedReady = true;
+            const dur = (player && Number(player.duration) > 0) ? Number(player.duration) : 0;
+            const pos = (player && Number(player.currentTime) > 0) ? Number(player.currentTime) : 0;
+            postToParent({ type: 'ready', videoId: currentVid, duration: dur, time: pos });
+        }
+
         function triggerPlaybackStarted() {
             if (hasActiveError) return;
             
@@ -167,13 +175,7 @@
             videoCover.classList.add('hidden');
             errorView.classList.remove('active');
 
-            const dur = (player && Number(player.duration) > 0) ? Number(player.duration) : 0;
-            const pos = (player && Number(player.currentTime) > 0) ? Number(player.currentTime) : 0;
-
-            if (!reportedReady) {
-                reportedReady = true;
-                postToParent({ type: 'ready', videoId: currentVid, duration: dur, time: pos });
-            }
+            reportReady();
 
             if (!wasAlreadyActive) {
                 startProgressReport();
@@ -291,6 +293,7 @@
                 
                 const onInitialCanPlay = function () {
                     player.removeEventListener('can-play', onInitialCanPlay);
+                    reportReady();
                     if (autoplay === '1' && !document.hidden) {
                         safePlay();
                     } else if (autoplay === '1' && document.hidden) {
@@ -417,10 +420,7 @@
                                         forceSeekAudioAndVideo(Number(data.time));
                                     }
                                     reportDurationNow();
-                                    if (!reportedReady && currentVid) {
-                                        reportedReady = true;
-                                        postToParent({ type: 'ready', videoId: currentVid, duration: Number(player.duration) || 0, time: Number(player.currentTime) || 0 });
-                                    }
+                                    reportReady();
                                     if (data.autoplay && !hasActiveError && !document.hidden) {
                                         safePlay();
                                     } else if (data.autoplay && document.hidden) {
