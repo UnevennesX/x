@@ -309,6 +309,19 @@
                 triggerPlaybackStarted(); 
             });
 
+            player.addEventListener('play', function () {
+                triggerPlaybackStarted();
+                if (!hasActiveError) {
+                    postToParent({
+                        type: 'progress',
+                        videoId: currentVid,
+                        time: Number(player.currentTime) || 0,
+                        duration: Number(player.duration) || 0,
+                        playing: true
+                    });
+                }
+            });
+
             player.addEventListener('time-update', function() {
                 if (!isRealPlaybackActive && player.currentTime > 0) {
                     triggerPlaybackStarted();
