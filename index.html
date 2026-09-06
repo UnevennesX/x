@@ -6,9 +6,12 @@
     <title>Voice Eva Player</title>
     <link rel="icon" href="data:,">
     
-    <link rel="preconnect" href="https://www.youtube.com">
-    <link rel="preconnect" href="https://www.google.com">
-    <link rel="preconnect" href="https://i.ytimg.com">
+    <link rel="stylesheet" href="https://cdn.vidstack.io/player/theme.css">
+    <link rel="stylesheet" href="https://cdn.vidstack.io/player/video.css">
+    <script type="module" src="https://cdn.vidstack.io/player"></script>
+    
+    <link rel="preconnect" href="https://www.google.com" crossorigin="true">
+    <link rel="preconnect" href="https://i.ytimg.com" crossorigin="true">
 
     <style>
         * { box-sizing: border-box; }
@@ -23,14 +26,10 @@
             display: flex; align-items: center; justify-content: center;
             background: #000000;
         }
-        #ytWrapper {
-            position: absolute; top: 0; left: 0;
+        #rmExternalPlayer {
             width: 100% !important; height: 100% !important;
-            border: 0; pointer-events: none;
-        }
-        #ytWrapper iframe {
-            width: 100% !important; height: 100% !important;
-            border: 0;
+            max-width: none !important; margin: 0 !important;
+            --media-font-family: inherit;
         }
         .video-cover {
             position: absolute; inset: 0; background: #000000;
@@ -74,16 +73,13 @@
             <p id="errText" class="error-msg">No se pudo reproducir este video.</p>
         </div>
 
-        <div id="ytWrapper">
-            <div id="ytPlayerTarget"></div>
-        </div>
+        <media-player id="rmExternalPlayer" class="vds-player" load="eager" stream-type="on-demand" log-level="silent" crossorigin playsinline data-media-player tabindex="0" role="region" aria-label="Video Player">
+            <media-provider keep-alive data-media-provider></media-provider>
+        </media-player>
     </div>
 
-    <!-- YouTube IFrame API oficial -->
-    <script src="https://www.youtube.com/iframe_api"></script>
-
     <script>
-        // Evita que YouTube detecte que la pestaña está en segundo plano
+        // Evitar que el navegador suspenda la visibilidad
         try {
             Object.defineProperty(document, 'hidden', { get: () => false });
             Object.defineProperty(document, 'visibilityState', { get: () => 'visible' });
@@ -98,20 +94,18 @@
         const wantsAutoplay = params.get('autoplay') === '1';
         const startTime = Number(params.get('t')) || 0;
 
+        const player = document.getElementById('rmExternalPlayer');
         const videoCover = document.getElementById('videoCover');
         const spinner = document.getElementById('loadingSpinner');
         const errorView = document.getElementById('errorView');
         const errCode = document.getElementById('errCode');
         const errText = document.getElementById('errText');
 
-        let ytPlayer = null;
-        let isApiReady = false;
         let currentVid = initialVid || null;
         let hasActiveError = false;
         let isReadyReported = false;
         let userWantsPlayback = wantsAutoplay;
-        let targetVolume = 100;
-        let progressInterval = null;
+        let isVidstackInitialized = false;
 
         const ERRORS_MAP = {
             150: 'El autor bloqueó la reproducción externa o tiene restricciones de copyright.',
@@ -156,99 +150,76 @@
             errorView.classList.remove('active');
         }
 
-        function startProgressTracker() {
-            if (progressInterval) clearInterval(progressInterval);
-            progressInterval = setInterval(() => {
-                if (!ytPlayer || typeof ytPlayer.getCurrentTime !== 'function') return;
-                try {
-                    const curTime = ytPlayer.getCurrentTime() || 0;
-                    const dur = ytPlayer.getDuration() || 0;
-                    const state = ytPlayer.getPlayerState();
-                    const isPlaying = (state === 1); // 1 = PLAYING
+        function markPlaybackStarted() {
+            if (hasActiveError) return;
+            hideSpinner();
+            videoCover.classList.add('hidden');
+            clearError();
 
-                    if (curTime > 0) hideSpinner();
-
-                    postToParent({
-                        type: 'progress',
-                        time: curTime,
-                        duration: dur,
-                        playing: isPlaying
-                    });
-                } catch (e) {}
-            }, 500);
+            if (!isReadyReported) {
+                isReadyReported = true;
+                postToParent({
+                    type: 'ready',
+                    duration: Number(player.duration) || 0,
+                    time: Number(player.currentTime) || 0
+                });
+            }
         }
 
-        // Se ejecuta automáticamente cuando YouTube IFrame API termina de cargar
-        window.onYouTubeIframeAPIReady = function() {
-            isApiReady = true;
-            ytPlayer = new YT.Player('ytPlayerTarget', {
-                width: '100%',
-                height: '100%',
-                videoId: currentVid || '',
-                playerVars: {
-                    autoplay: wantsAutoplay ? 1 : 0,
-                    start: startTime,
-                    controls: 0,
-                    disablekb: 1,
-                    fs: 0,
-                    iv_load_policy: 3,
-                    modestbranding: 1,
-                    playsinline: 1,
-                    rel: 0,
-                    enablejsapi: 1,
-                    origin: window.location.origin
-                },
-                events: {
-                    onReady: (event) => {
-                        event.target.setVolume(targetVolume);
-                        startProgressTracker();
-                        if (currentVid && wantsAutoplay) {
-                            event.target.playVideo();
-                        } else {
-                            hideSpinner();
-                        }
-                    },
-                    onStateChange: (event) => {
-                        // 1 = PLAYING
-                        if (event.data === 1) {
-                            hideSpinner();
-                            videoCover.classList.add('hidden');
-                            clearError();
-
-                            if (!isReadyReported) {
-                                isReadyReported = true;
-                                postToParent({
-                                    type: 'ready',
-                                    duration: ytPlayer.getDuration() || 0,
-                                    time: ytPlayer.getCurrentTime() || 0
-                                });
-                            }
-                        }
-                        // 2 = PAUSED
-                        else if (event.data === 2) {
-                            // Si el navegador intentó pausar en segundo plano pero el usuario quería reproducción:
-                            if (userWantsPlayback && !hasActiveError) {
-                                setTimeout(() => {
-                                    if (userWantsPlayback && ytPlayer && ytPlayer.getPlayerState() === 2) {
-                                        ytPlayer.playVideo();
-                                    }
-                                }, 50);
-                            }
-                        }
-                        // 0 = ENDED
-                        else if (event.data === 0) {
-                            userWantsPlayback = false;
-                            postToParent({ type: 'ended' });
-                        }
-                    },
-                    onError: (event) => {
-                        triggerError(event.data);
-                    }
+        // Obtener el iframe real de YouTube dentro de Vidstack
+        function getActiveYouTubeIframe() {
+            let frame = player.querySelector('iframe');
+            if (!frame && player.shadowRoot) {
+                frame = player.shadowRoot.querySelector('iframe');
+            }
+            if (!frame) {
+                const provider = player.querySelector('media-provider');
+                if (provider) {
+                    frame = provider.querySelector('iframe') || (provider.shadowRoot && provider.shadowRoot.querySelector('iframe'));
                 }
-            });
-        };
+            }
+            return frame;
+        }
 
-        // CARGA CONTINUA SIN RECARGAR EL IFRAME
+        function sendDirectCommand(funcName, args) {
+            try {
+                const frame = getActiveYouTubeIframe();
+                if (frame && frame.contentWindow) {
+                    frame.contentWindow.postMessage(JSON.stringify({
+                        event: 'command',
+                        func: funcName,
+                        args: args || []
+                    }), '*');
+                    return true;
+                }
+            } catch (e) {}
+            return false;
+        }
+
+        function safePlay() {
+            if (!player || hasActiveError) return;
+            userWantsPlayback = true;
+
+            sendDirectCommand('playVideo');
+
+            try {
+                const prom = player.play();
+                if (prom && typeof prom.catch === 'function') {
+                    prom.catch(() => {
+                        sendDirectCommand('playVideo');
+                    });
+                }
+            } catch (e) {
+                sendDirectCommand('playVideo');
+            }
+        }
+
+        function forceSeek(timeSec) {
+            const target = Math.max(0, Number(timeSec) || 0);
+            try { player.currentTime = target; } catch (e) {}
+            sendDirectCommand('seekTo', [target, true]);
+        }
+
         function loadVideoDirectly(vid, timeSec, autoplay) {
             currentVid = vid;
             clearError();
@@ -259,24 +230,117 @@
 
             const t = Number(timeSec) || 0;
 
-            if (ytPlayer && typeof ytPlayer.loadVideoById === 'function') {
+            // Si Vidstack ya está inicializado y tiene el iframe vivo:
+            // NO TOCAMOS player.src (eso es lo que destruía el iframe en segundo plano).
+            const iframe = getActiveYouTubeIframe();
+            if (isVidstackInitialized && iframe) {
+                sendDirectCommand('loadVideoById', [{
+                    videoId: vid,
+                    startSeconds: t
+                }]);
+                
                 if (autoplay) {
-                    ytPlayer.loadVideoById({
-                        videoId: vid,
-                        startSeconds: t
-                    });
+                    setTimeout(() => safePlay(), 50);
                 } else {
-                    ytPlayer.cueVideoById({
-                        videoId: vid,
-                        startSeconds: t
-                    });
                     hideSpinner();
                 }
+                return;
             }
+
+            // Primera carga: se inicializa Vidstack
+            isVidstackInitialized = true;
+            player.src = 'youtube/' + vid;
+
+            const onLoaded = () => {
+                player.removeEventListener('can-play', onLoaded);
+                if (t > 0) forceSeek(t);
+
+                postToParent({
+                    type: 'ready',
+                    duration: Number(player.duration) || 0,
+                    time: Number(player.currentTime) || 0
+                });
+                isReadyReported = true;
+
+                if (autoplay) safePlay();
+                else hideSpinner();
+            };
+            player.addEventListener('can-play', onLoaded);
         }
 
-        // Listener de mensajes que llegan desde room-music.js
+        if (player) {
+            if (initialVid) {
+                loadVideoDirectly(initialVid, startTime, wantsAutoplay);
+            } else {
+                hideSpinner();
+            }
+
+            player.addEventListener('playing', markPlaybackStarted);
+            player.addEventListener('play', markPlaybackStarted);
+
+            player.addEventListener('pause', () => {
+                // Si el navegador intenta pausar por estar en otra pestaña, forzamos a seguir sonando
+                if (userWantsPlayback && !hasActiveError) {
+                    sendDirectCommand('playVideo');
+                    setTimeout(() => {
+                        if (userWantsPlayback && player.paused) {
+                            safePlay();
+                        }
+                    }, 80);
+                }
+            });
+
+            player.addEventListener('time-update', () => {
+                if (player.currentTime > 0) hideSpinner();
+                postToParent({
+                    type: 'progress',
+                    time: Number(player.currentTime) || 0,
+                    duration: Number(player.duration) || 0,
+                    playing: !player.paused
+                });
+            });
+
+            player.addEventListener('loaded-metadata', () => {
+                const dur = Number(player.duration) || 0;
+                if (dur > 0) postToParent({ type: 'duration', duration: dur });
+            });
+
+            player.addEventListener('ended', () => {
+                userWantsPlayback = false;
+                postToParent({ type: 'ended' });
+            });
+
+            player.addEventListener('error', (ev) => {
+                const detail = ev && ev.detail;
+                const err = (detail && (detail.code || detail.message || detail.error)) || 'Playback Error';
+                triggerError(err);
+            });
+        }
+
         window.addEventListener('message', (ev) => {
+            if (typeof ev.data === 'string') {
+                if (ev.data.includes('onError')) {
+                    try {
+                        const ytData = JSON.parse(ev.data);
+                        if (ytData.event === 'onError' && ytData.info) triggerError(ytData.info);
+                    } catch (e) {}
+                }
+                if (ev.data.includes('onStateChange')) {
+                    try {
+                        const ytData = JSON.parse(ev.data);
+                        // Estado 1 = PLAYING
+                        if (ytData.info === 1) {
+                            markPlaybackStarted();
+                        }
+                        // Estado 2 = PAUSED
+                        if (ytData.info === 2 && userWantsPlayback && !hasActiveError) {
+                            sendDirectCommand('playVideo');
+                        }
+                    } catch (e) {}
+                }
+                return;
+            }
+
             const data = ev.data;
             if (!data || typeof data !== 'object' || data.source !== 'voice-eva') return;
 
@@ -292,51 +356,46 @@
                 case 'play':
                 case 'keepalive':
                     userWantsPlayback = true;
-                    if (ytPlayer && typeof ytPlayer.playVideo === 'function' && !hasActiveError) {
-                        ytPlayer.playVideo();
-                    }
+                    if (!hasActiveError) safePlay();
                     break;
 
                 case 'pause':
                     userWantsPlayback = false;
-                    if (ytPlayer && typeof ytPlayer.pauseVideo === 'function') {
-                        ytPlayer.pauseVideo();
-                    }
+                    try { player.pause(); } catch (e) {}
+                    sendDirectCommand('pauseVideo');
                     hideSpinner();
                     break;
 
                 case 'seek':
-                    if (typeof data.time !== 'undefined' && ytPlayer && typeof ytPlayer.seekTo === 'function') {
-                        ytPlayer.seekTo(Number(data.time), true);
+                    if (typeof data.time !== 'undefined') {
+                        forceSeek(Number(data.time));
                     }
                     break;
 
                 case 'setVolume':
                     if (typeof data.volume !== 'undefined') {
-                        targetVolume = Math.max(0, Math.min(100, Number(data.volume)));
-                        if (ytPlayer && typeof ytPlayer.setVolume === 'function') {
-                            ytPlayer.setVolume(targetVolume);
-                        }
+                        const v = Math.max(0, Math.min(100, Number(data.volume)));
+                        player.volume = v / 100;
+                        sendDirectCommand('setVolume', [v]);
                     }
                     break;
 
                 case 'mute':
-                    if (ytPlayer && typeof ytPlayer.mute === 'function') {
-                        ytPlayer.mute();
-                    }
+                    player.muted = true;
+                    sendDirectCommand('mute');
                     break;
 
                 case 'unmute':
-                    if (ytPlayer && typeof ytPlayer.unMute === 'function') {
-                        ytPlayer.unMute();
-                    }
+                    player.muted = false;
+                    sendDirectCommand('unMute');
                     break;
 
                 case 'stop':
                     userWantsPlayback = false;
-                    if (ytPlayer && typeof ytPlayer.stopVideo === 'function') {
-                        ytPlayer.stopVideo();
-                    }
+                    try {
+                        player.pause();
+                    } catch (e) {}
+                    sendDirectCommand('stopVideo');
                     clearError();
                     hideSpinner();
                     videoCover.classList.remove('hidden');
