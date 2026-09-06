@@ -79,7 +79,7 @@
     </div>
 
     <script>
-        // Evitar que el navegador suspenda la visibilidad
+        // Neutralizamos la pérdida de foco para que el navegador no suspenda el contexto
         try {
             Object.defineProperty(document, 'hidden', { get: () => false });
             Object.defineProperty(document, 'visibilityState', { get: () => 'visible' });
@@ -166,7 +166,7 @@
             }
         }
 
-        // Obtener el iframe real de YouTube dentro de Vidstack
+        // Busca el iframe de YouTube de forma robusta dentro de Vidstack
         function getActiveYouTubeIframe() {
             let frame = player.querySelector('iframe');
             if (!frame && player.shadowRoot) {
@@ -197,8 +197,7 @@
         }
 
         function safePlay() {
-            if (!player || hasActiveError) return;
-            userWantsPlayback = true;
+            if (!player || hasActiveError || !userWantsPlayback) return;
 
             sendDirectCommand('playVideo');
 
@@ -206,11 +205,11 @@
                 const prom = player.play();
                 if (prom && typeof prom.catch === 'function') {
                     prom.catch(() => {
-                        sendDirectCommand('playVideo');
+                        if (userWantsPlayback) sendDirectCommand('playVideo');
                     });
                 }
             } catch (e) {
-                sendDirectCommand('playVideo');
+                if (userWantsPlayback) sendDirectCommand('playVideo');
             }
         }
 
@@ -230,24 +229,23 @@
 
             const t = Number(timeSec) || 0;
 
-            // Si Vidstack ya está inicializado y tiene el iframe vivo:
-            // NO TOCAMOS player.src (eso es lo que destruía el iframe en segundo plano).
+            // Si Vidstack ya está inicializado, cambiamos el video en caliente SIN recargar el iframe
             const iframe = getActiveYouTubeIframe();
             if (isVidstackInitialized && iframe) {
                 sendDirectCommand('loadVideoById', [{
                     videoId: vid,
                     startSeconds: t
                 }]);
-                
+
                 if (autoplay) {
-                    setTimeout(() => safePlay(), 50);
+                    setTimeout(() => safePlay(), 60);
                 } else {
                     hideSpinner();
                 }
                 return;
             }
 
-            // Primera carga: se inicializa Vidstack
+            // Primera carga al entrar a la sala
             isVidstackInitialized = true;
             player.src = 'youtube/' + vid;
 
@@ -279,14 +277,13 @@
             player.addEventListener('play', markPlaybackStarted);
 
             player.addEventListener('pause', () => {
-                // Si el navegador intenta pausar por estar en otra pestaña, forzamos a seguir sonando
+                // Solo recuperar la reproducción si el usuario no mandó pausar o detener explícitamente
                 if (userWantsPlayback && !hasActiveError) {
-                    sendDirectCommand('playVideo');
                     setTimeout(() => {
                         if (userWantsPlayback && player.paused) {
                             safePlay();
                         }
-                    }, 80);
+                    }, 100);
                 }
             });
 
@@ -328,11 +325,9 @@
                 if (ev.data.includes('onStateChange')) {
                     try {
                         const ytData = JSON.parse(ev.data);
-                        // Estado 1 = PLAYING
                         if (ytData.info === 1) {
                             markPlaybackStarted();
                         }
-                        // Estado 2 = PAUSED
                         if (ytData.info === 2 && userWantsPlayback && !hasActiveError) {
                             sendDirectCommand('playVideo');
                         }
@@ -391,11 +386,15 @@
                     break;
 
                 case 'stop':
+                    // Detención total sin reintentos
                     userWantsPlayback = false;
+                    isVidstackInitialized = false;
                     try {
                         player.pause();
+                        player.src = '';
                     } catch (e) {}
                     sendDirectCommand('stopVideo');
+                    sendDirectCommand('pauseVideo');
                     clearError();
                     hideSpinner();
                     videoCover.classList.remove('hidden');
