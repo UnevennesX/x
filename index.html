@@ -97,7 +97,7 @@
         let currentVid = videoId || null;
         let hasActiveError = false;
         let isReadyReported = false;
-        let pendingAutoplay = false;
+        let userWantsPlayback = wantsAutoplay;
 
         const ERRORS_MAP = {
             150: 'El autor bloqueó la reproducción externa o tiene restricciones de copyright.',
@@ -160,17 +160,13 @@
 
         function safePlay() {
             if (!player || hasActiveError) return;
+            userWantsPlayback = true;
             try {
                 const prom = player.play();
                 if (prom && typeof prom.catch === 'function') {
-                    prom.catch(() => {
-                        pendingAutoplay = true;
-                        console.warn('[Vidstack] Autoplay interceptado por política del navegador. Esperando interacción o visibilidad.');
-                    });
+                    prom.catch(() => {});
                 }
-            } catch (e) {
-                pendingAutoplay = true;
-            }
+            } catch (e) {}
         }
 
         function forceSeek(timeSec) {
@@ -189,7 +185,7 @@
             } catch (e) {}
         }
 
-        // ── Inicialización de Vidstack ─────────────────────────────────────────
+        // ── Vidstack Initialization ──────────────────────────────────────────
         if (player) {
             if (videoId) {
                 showSpinner();
@@ -221,8 +217,15 @@
             player.addEventListener('playing', markPlaybackStarted);
             player.addEventListener('play', markPlaybackStarted);
 
-            player.addEventListener('waiting', () => {
-                if (player.currentTime > 0) showSpinner();
+            // ANTI-PAUSA EN SEGUNDO PLANO: Si el navegador o YouTube intentan pausar cuando el usuario quiere música, forzar reanudación
+            player.addEventListener('pause', () => {
+                if (userWantsPlayback && !hasActiveError) {
+                    setTimeout(() => {
+                        if (userWantsPlayback && player.paused) {
+                            safePlay();
+                        }
+                    }, 50);
+                }
             });
 
             player.addEventListener('time-update', () => {
@@ -241,6 +244,7 @@
             });
 
             player.addEventListener('ended', () => {
+                userWantsPlayback = false;
                 postToParent({ type: 'ended' });
             });
 
@@ -251,17 +255,8 @@
             });
         }
 
-        // Reintento de reproducción si el navegador bloqueó el autoplay al volver a la pestaña
-        document.addEventListener('visibilitychange', () => {
-            if (!document.hidden && pendingAutoplay && !hasActiveError) {
-                pendingAutoplay = false;
-                safePlay();
-            }
-        });
-
-        // ── Receptor de Comandos desde la Sala (room-music.js) ─────────────────
+        // ── Comandos desde la Sala ───────────────────────────────────────────
         window.addEventListener('message', (ev) => {
-            // Escuchar errores originados en el Iframe nativo de YouTube
             if (typeof ev.data === 'string') {
                 if (ev.data.includes('onError')) {
                     try {
@@ -283,13 +278,17 @@
                         if (currentVid === data.videoId && !hasActiveError && player.src) {
                             if (typeof data.time === 'number') forceSeek(data.time);
                             if (data.autoplay) safePlay();
-                            else try { player.pause(); } catch (e) {}
+                            else {
+                                userWantsPlayback = false;
+                                try { player.pause(); } catch (e) {}
+                            }
                             break;
                         }
 
                         clearError();
                         currentVid = data.videoId;
                         isReadyReported = false;
+                        userWantsPlayback = !!data.autoplay;
                         showSpinner();
                         videoCover.classList.remove('hidden');
 
@@ -314,10 +313,13 @@
                     break;
 
                 case 'play':
+                case 'keepalive':
+                    userWantsPlayback = true;
                     if (!hasActiveError) safePlay();
                     break;
 
                 case 'pause':
+                    userWantsPlayback = false;
                     try { player.pause(); } catch (e) {}
                     hideSpinner();
                     break;
@@ -343,6 +345,7 @@
                     break;
 
                 case 'stop':
+                    userWantsPlayback = false;
                     try {
                         player.pause();
                         player.src = '';
