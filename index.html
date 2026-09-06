@@ -3,122 +3,353 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Audio Engine</title>
+    <title>Voice Eva Player</title>
+    <link rel="icon" href="data:,">
     
     <link rel="stylesheet" href="https://cdn.vidstack.io/player/theme.css">
     <link rel="stylesheet" href="https://cdn.vidstack.io/player/video.css">
     <script type="module" src="https://cdn.vidstack.io/player"></script>
+    
+    <link rel="preconnect" href="https://www.google.com" crossorigin="true">
+    <link rel="preconnect" href="https://i.ytimg.com" crossorigin="true">
 
     <style>
-        * { box-sizing: border-box; margin: 0; padding: 0; }
-        html, body, #playerHost {
-            width: 100%; height: 100%; overflow: hidden;
-            background: #000; display: flex; align-items: center; justify-content: center;
+        * { box-sizing: border-box; }
+        html, body {
+            margin: 0; padding: 0; width: 100%; height: 100%;
+            overflow: hidden; background-color: #000000;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            -webkit-font-smoothing: antialiased;
+        }
+        #playerHost {
+            position: relative; width: 100%; height: 100%;
+            display: flex; align-items: center; justify-content: center;
+            background: #000000;
         }
         #rmExternalPlayer {
-            width: 100% !important; height: 100% !important; border: 0;
+            width: 100% !important; height: 100% !important;
+            max-width: none !important; margin: 0 !important;
+            --media-font-family: inherit;
         }
-        .spinner {
-            position: absolute; width: 36px; height: 36px;
-            border: 3px solid rgba(255,255,255,0.15); border-top-color: #4c6ef5;
-            border-radius: 50%; animation: spin 0.7s linear infinite; display: none; z-index: 20;
+        .video-cover {
+            position: absolute; inset: 0; background: #000000;
+            z-index: 10; pointer-events: none; opacity: 1;
+            transition: opacity 0.25s ease;
         }
-        .spinner.active { display: block; }
+        .video-cover.hidden { opacity: 0 !important; }
+        .minimal-spinner {
+            position: absolute; z-index: 50; width: 34px; height: 34px;
+            border: 2.5px solid rgba(255, 255, 255, 0.12); border-top-color: #4c6ef5;
+            border-radius: 50%; animation: spin 0.75s linear infinite;
+            pointer-events: none; display: none; opacity: 0;
+            transition: opacity 0.2s ease;
+        }
+        .minimal-spinner.active { display: block !important; opacity: 1 !important; }
         @keyframes spin { to { transform: rotate(360deg); } }
+        .minimal-error {
+            position: absolute; inset: 0; z-index: 100; background: #000000;
+            display: flex; flex-direction: column; align-items: center; justify-content: center;
+            padding: 24px; text-align: center; opacity: 0; pointer-events: none;
+            transition: opacity 0.25s ease;
+        }
+        .minimal-error.active { opacity: 1 !important; pointer-events: auto !important; }
+        .error-tag {
+            font-size: 11px; font-weight: 700; letter-spacing: 1.2px;
+            text-transform: uppercase; color: #fa5252; margin-bottom: 8px;
+        }
+        .error-msg {
+            font-size: 13px; font-weight: 400; color: #b0b0b0;
+            max-width: 320px; line-height: 1.5; margin: 0;
+        }
     </style>
 </head>
 <body>
     <div id="playerHost">
-        <div id="loadingSpinner" class="spinner active"></div>
-        <media-player id="rmExternalPlayer" class="vds-player" load="eager" playsinline crossorigin>
-            <media-provider></media-provider>
+        <div id="videoCover" class="video-cover"></div>
+        <div id="loadingSpinner" class="minimal-spinner active"></div>
+
+        <div id="errorView" class="minimal-error">
+            <span id="errCode" class="error-tag">ERROR DE REPRODUCCIÓN</span>
+            <p id="errText" class="error-msg">No se pudo reproducir este video.</p>
+        </div>
+
+        <media-player id="rmExternalPlayer" class="vds-player" load="eager" view-type="video" stream-type="on-demand" log-level="silent" crossorigin playsinline data-media-player tabindex="0" role="region" aria-label="Video Player">
+            <media-provider keep-alive data-media-provider>
+                <iframe id="ytIframe" tabindex="-1" data-no-controls class="vds-youtube" aria-hidden="true" frameborder="0" allow="autoplay; fullscreen; encrypted-media; picture-in-picture; accelerometer; gyroscope"></iframe>
+            </media-provider>
         </media-player>
     </div>
 
     <script>
         const params = new URLSearchParams(window.location.search);
         const videoId = params.get('v');
-        const autoplay = params.get('autoplay') === '1';
+        const wantsAutoplay = params.get('autoplay') === '1';
         const startTime = Number(params.get('t')) || 0;
 
         const player = document.getElementById('rmExternalPlayer');
+        const ytIframe = document.getElementById('ytIframe');
+        const videoCover = document.getElementById('videoCover');
         const spinner = document.getElementById('loadingSpinner');
+        const errorView = document.getElementById('errorView');
+        const errCode = document.getElementById('errCode');
+        const errText = document.getElementById('errText');
 
-        function post(msg) {
+        let currentVid = videoId || null;
+        let hasActiveError = false;
+        let isReadyReported = false;
+        let pendingAutoplay = false;
+
+        const ERRORS_MAP = {
+            150: 'El autor bloqueó la reproducción externa o tiene restricciones de copyright.',
+            101: 'El autor bloqueó la reproducción externa o tiene restricciones de copyright.',
+            100: 'El video fue eliminado o configurado como privado.',
+            2: 'Identificador de video de YouTube no válido.',
+            5: 'Error de decodificación en el reproductor HTML5.'
+        };
+
+        function postToParent(data) {
             try {
-                window.parent.postMessage(Object.assign({ source: 'x-player' }, msg), '*');
+                window.parent.postMessage(Object.assign({ source: 'x-player', videoId: currentVid }, data), '*');
             } catch (e) {}
         }
 
-        if (player && videoId) {
-            player.src = 'youtube/' + videoId;
-            player.currentTime = startTime;
+        function showSpinner() {
+            if (!hasActiveError) spinner.classList.add('active');
+        }
 
-            player.addEventListener('can-play', () => {
-                spinner.classList.remove('active');
-                post({ type: 'canplay', duration: player.duration });
-                if (autoplay) {
-                    player.play().catch(() => {
-                        console.warn('[Vidstack] Autoplay interceptado por política de usuario.');
+        function hideSpinner() {
+            spinner.classList.remove('active');
+        }
+
+        function triggerError(code) {
+            if (hasActiveError) return;
+            hasActiveError = true;
+            hideSpinner();
+            videoCover.classList.remove('hidden');
+
+            const num = Number(code);
+            const msg = (!isNaN(num) && ERRORS_MAP[num]) ? ERRORS_MAP[num] : String(code || 'No se pudo reproducir este video.');
+
+            errCode.textContent = !isNaN(num) ? `ERROR ${num}` : 'ERROR';
+            errText.textContent = msg;
+            errorView.classList.add('active');
+
+            postToParent({ type: 'error', code: code, message: msg });
+        }
+
+        function clearError() {
+            hasActiveError = false;
+            errorView.classList.remove('active');
+        }
+
+        function markPlaybackStarted() {
+            if (hasActiveError) return;
+            hideSpinner();
+            videoCover.classList.add('hidden');
+            clearError();
+
+            if (!isReadyReported) {
+                isReadyReported = true;
+                postToParent({
+                    type: 'ready',
+                    duration: Number(player.duration) || 0,
+                    time: Number(player.currentTime) || 0
+                });
+            }
+        }
+
+        function safePlay() {
+            if (!player || hasActiveError) return;
+            try {
+                const prom = player.play();
+                if (prom && typeof prom.catch === 'function') {
+                    prom.catch(() => {
+                        pendingAutoplay = true;
+                        console.warn('[Vidstack] Autoplay interceptado por política del navegador. Esperando interacción o visibilidad.');
                     });
                 }
-            });
+            } catch (e) {
+                pendingAutoplay = true;
+            }
+        }
 
-            player.addEventListener('loaded-metadata', () => {
-                if (player.duration > 0) {
-                    post({ type: 'duration', duration: player.duration });
+        function forceSeek(timeSec) {
+            const target = Math.max(0, Number(timeSec) || 0);
+            try { player.currentTime = target; } catch (e) {}
+
+            try {
+                const frame = (ytIframe && ytIframe.contentWindow) ? ytIframe : player.querySelector('iframe');
+                if (frame && frame.contentWindow) {
+                    frame.contentWindow.postMessage(JSON.stringify({
+                        event: 'command',
+                        func: 'seekTo',
+                        args: [target, true]
+                    }), '*');
                 }
+            } catch (e) {}
+        }
+
+        // ── Inicialización de Vidstack ─────────────────────────────────────────
+        if (player) {
+            if (videoId) {
+                showSpinner();
+                videoCover.classList.remove('hidden');
+                player.src = 'youtube/' + videoId;
+
+                const onCanPlay = () => {
+                    player.removeEventListener('can-play', onCanPlay);
+                    if (startTime > 0) forceSeek(startTime);
+                    
+                    postToParent({
+                        type: 'ready',
+                        duration: Number(player.duration) || 0,
+                        time: Number(player.currentTime) || 0
+                    });
+                    isReadyReported = true;
+
+                    if (wantsAutoplay) {
+                        safePlay();
+                    } else {
+                        hideSpinner();
+                    }
+                };
+                player.addEventListener('can-play', onCanPlay);
+            } else {
+                hideSpinner();
+            }
+
+            player.addEventListener('playing', markPlaybackStarted);
+            player.addEventListener('play', markPlaybackStarted);
+
+            player.addEventListener('waiting', () => {
+                if (player.currentTime > 0) showSpinner();
             });
 
             player.addEventListener('time-update', () => {
-                post({
+                if (player.currentTime > 0) hideSpinner();
+                postToParent({
                     type: 'progress',
-                    time: player.currentTime,
-                    duration: player.duration
+                    time: Number(player.currentTime) || 0,
+                    duration: Number(player.duration) || 0,
+                    playing: !player.paused
                 });
             });
 
-            player.addEventListener('ended', () => {
-                post({ type: 'ended' });
+            player.addEventListener('loaded-metadata', () => {
+                const dur = Number(player.duration) || 0;
+                if (dur > 0) postToParent({ type: 'duration', duration: dur });
             });
 
-            player.addEventListener('error', (err) => {
-                spinner.classList.remove('active');
-                post({ type: 'error', error: err.detail || 'Playback Error' });
+            player.addEventListener('ended', () => {
+                postToParent({ type: 'ended' });
+            });
+
+            player.addEventListener('error', (ev) => {
+                const detail = ev && ev.detail;
+                const err = (detail && (detail.code || detail.message || detail.error)) || 'Playback Error';
+                triggerError(err);
             });
         }
 
-        // Receptor de Comandos
+        // Reintento de reproducción si el navegador bloqueó el autoplay al volver a la pestaña
+        document.addEventListener('visibilitychange', () => {
+            if (!document.hidden && pendingAutoplay && !hasActiveError) {
+                pendingAutoplay = false;
+                safePlay();
+            }
+        });
+
+        // ── Receptor de Comandos desde la Sala (room-music.js) ─────────────────
         window.addEventListener('message', (ev) => {
+            // Escuchar errores originados en el Iframe nativo de YouTube
+            if (typeof ev.data === 'string') {
+                if (ev.data.includes('onError')) {
+                    try {
+                        const ytData = JSON.parse(ev.data);
+                        if (ytData.event === 'onError' && ytData.info) triggerError(ytData.info);
+                    } catch (e) {}
+                }
+                return;
+            }
+
             const data = ev.data;
             if (!data || typeof data !== 'object' || data.source !== 'voice-eva') return;
 
-            switch (data.type) {
+            const action = data.cmd || data.type;
+
+            switch (action) {
+                case 'load':
+                    if (data.videoId) {
+                        if (currentVid === data.videoId && !hasActiveError && player.src) {
+                            if (typeof data.time === 'number') forceSeek(data.time);
+                            if (data.autoplay) safePlay();
+                            else try { player.pause(); } catch (e) {}
+                            break;
+                        }
+
+                        clearError();
+                        currentVid = data.videoId;
+                        isReadyReported = false;
+                        showSpinner();
+                        videoCover.classList.remove('hidden');
+
+                        player.src = 'youtube/' + data.videoId;
+
+                        const onLoaded = () => {
+                            player.removeEventListener('can-play', onLoaded);
+                            if (typeof data.time === 'number' && data.time > 0) forceSeek(data.time);
+
+                            postToParent({
+                                type: 'ready',
+                                duration: Number(player.duration) || 0,
+                                time: Number(player.currentTime) || 0
+                            });
+                            isReadyReported = true;
+
+                            if (data.autoplay) safePlay();
+                            else hideSpinner();
+                        };
+                        player.addEventListener('can-play', onLoaded);
+                    }
+                    break;
+
                 case 'play':
-                    player.play().catch(() => {});
+                    if (!hasActiveError) safePlay();
                     break;
+
                 case 'pause':
-                    player.pause();
+                    try { player.pause(); } catch (e) {}
+                    hideSpinner();
                     break;
+
                 case 'seek':
-                    if (Number.isFinite(data.time)) {
-                        player.currentTime = Math.max(0, Number(data.time));
+                    if (typeof data.time !== 'undefined') {
+                        forceSeek(Number(data.time));
                     }
                     break;
+
                 case 'setVolume':
-                    if (Number.isFinite(data.volume)) {
-                        player.volume = Math.max(0, Math.min(1, data.volume / 100));
+                    if (typeof data.volume !== 'undefined') {
+                        player.volume = Math.max(0, Math.min(1, Number(data.volume) / 100));
                     }
                     break;
+
                 case 'mute':
                     player.muted = true;
                     break;
+
                 case 'unmute':
                     player.muted = false;
                     break;
+
                 case 'stop':
-                    player.pause();
-                    player.src = '';
+                    try {
+                        player.pause();
+                        player.src = '';
+                    } catch (e) {}
+                    clearError();
+                    hideSpinner();
+                    videoCover.classList.remove('hidden');
                     break;
             }
         });
