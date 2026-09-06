@@ -73,7 +73,7 @@
             <p id="errText" class="error-msg">No se pudo reproducir este video.</p>
         </div>
 
-        <media-player id="rmExternalPlayer" class="vds-player" load="eager" view-type="video" stream-type="on-demand" log-level="silent" crossorigin playsinline data-media-player tabindex="0" role="region" aria-label="Video Player">
+        <media-player id="rmExternalPlayer" class="vds-player" load="eager" stream-type="on-demand" log-level="silent" crossorigin playsinline data-media-player tabindex="0" role="region" aria-label="Video Player">
             <media-provider keep-alive data-media-provider>
                 <iframe id="ytIframe" tabindex="-1" data-no-controls class="vds-youtube" aria-hidden="true" frameborder="0" allow="autoplay; fullscreen; encrypted-media; picture-in-picture; accelerometer; gyroscope"></iframe>
             </media-provider>
@@ -81,6 +81,17 @@
     </div>
 
     <script>
+        // ── ENGAÑO DE VISIBILIDAD PARA YOUTUBE ─────────────────────────────
+        // Evitamos que el iframe de YouTube se entere de que la pestaña cambió
+        try {
+            Object.defineProperty(document, 'hidden', { get: () => false });
+            Object.defineProperty(document, 'visibilityState', { get: () => 'visible' });
+        } catch (e) {}
+
+        window.addEventListener('visibilitychange', (e) => {
+            e.stopImmediatePropagation();
+        }, true);
+
         const params = new URLSearchParams(window.location.search);
         const videoId = params.get('v');
         const wantsAutoplay = params.get('autoplay') === '1';
@@ -158,34 +169,46 @@
             }
         }
 
-        function safePlay() {
-            if (!player || hasActiveError) return;
-            userWantsPlayback = true;
-            try {
-                const prom = player.play();
-                if (prom && typeof prom.catch === 'function') {
-                    prom.catch(() => {});
-                }
-            } catch (e) {}
-        }
-
-        function forceSeek(timeSec) {
-            const target = Math.max(0, Number(timeSec) || 0);
-            try { player.currentTime = target; } catch (e) {}
-
+        function sendDirectCommand(funcName, args) {
             try {
                 const frame = (ytIframe && ytIframe.contentWindow) ? ytIframe : player.querySelector('iframe');
                 if (frame && frame.contentWindow) {
                     frame.contentWindow.postMessage(JSON.stringify({
                         event: 'command',
-                        func: 'seekTo',
-                        args: [target, true]
+                        func: funcName,
+                        args: args || []
                     }), '*');
                 }
             } catch (e) {}
         }
 
-        // ── Vidstack Initialization ──────────────────────────────────────────
+        function safePlay() {
+            if (!player || hasActiveError) return;
+            userWantsPlayback = true;
+
+            // 1. Comando directo al iframe de YouTube (ignora políticas del elemento HTML)
+            sendDirectCommand('playVideo');
+
+            // 2. Comando a Vidstack
+            try {
+                const prom = player.play();
+                if (prom && typeof prom.catch === 'function') {
+                    prom.catch(() => {
+                        sendDirectCommand('playVideo');
+                    });
+                }
+            } catch (e) {
+                sendDirectCommand('playVideo');
+            }
+        }
+
+        function forceSeek(timeSec) {
+            const target = Math.max(0, Number(timeSec) || 0);
+            try { player.currentTime = target; } catch (e) {}
+            sendDirectCommand('seekTo', [target, true]);
+        }
+
+        // ── Inicialización de Vidstack ─────────────────────────────────────────
         if (player) {
             if (videoId) {
                 showSpinner();
@@ -217,14 +240,16 @@
             player.addEventListener('playing', markPlaybackStarted);
             player.addEventListener('play', markPlaybackStarted);
 
-            // ANTI-PAUSA EN SEGUNDO PLANO: Si el navegador o YouTube intentan pausar cuando el usuario quiere música, forzar reanudación
+            // ANTI-PAUSA AL CAMBIAR DE PESTAÑA:
+            // Si YouTube se auto-pausa porque la pestaña quedó en segundo plano, forzar playVideo inmediato
             player.addEventListener('pause', () => {
                 if (userWantsPlayback && !hasActiveError) {
+                    sendDirectCommand('playVideo');
                     setTimeout(() => {
                         if (userWantsPlayback && player.paused) {
                             safePlay();
                         }
-                    }, 50);
+                    }, 80);
                 }
             });
 
@@ -255,13 +280,22 @@
             });
         }
 
-        // ── Comandos desde la Sala ───────────────────────────────────────────
+        // ── Comandos desde la Sala (room-music.js) ───────────────────────────
         window.addEventListener('message', (ev) => {
             if (typeof ev.data === 'string') {
                 if (ev.data.includes('onError')) {
                     try {
                         const ytData = JSON.parse(ev.data);
                         if (ytData.event === 'onError' && ytData.info) triggerError(ytData.info);
+                    } catch (e) {}
+                }
+                // Si YouTube avisa que pausó por cambio de pestaña, forzar reanudación
+                if (ev.data.includes('onStateChange')) {
+                    try {
+                        const ytData = JSON.parse(ev.data);
+                        if (ytData.info === 2 && userWantsPlayback && !hasActiveError) {
+                            sendDirectCommand('playVideo');
+                        }
                     } catch (e) {}
                 }
                 return;
@@ -321,6 +355,7 @@
                 case 'pause':
                     userWantsPlayback = false;
                     try { player.pause(); } catch (e) {}
+                    sendDirectCommand('pauseVideo');
                     hideSpinner();
                     break;
 
@@ -332,16 +367,20 @@
 
                 case 'setVolume':
                     if (typeof data.volume !== 'undefined') {
-                        player.volume = Math.max(0, Math.min(1, Number(data.volume) / 100));
+                        var v = Math.max(0, Math.min(100, Number(data.volume)));
+                        player.volume = v / 100;
+                        sendDirectCommand('setVolume', [v]);
                     }
                     break;
 
                 case 'mute':
                     player.muted = true;
+                    sendDirectCommand('mute');
                     break;
 
                 case 'unmute':
                     player.muted = false;
+                    sendDirectCommand('unMute');
                     break;
 
                 case 'stop':
