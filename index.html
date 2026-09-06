@@ -81,8 +81,7 @@
     </div>
 
     <script>
-        // ── ENGAÑO DE VISIBILIDAD PARA YOUTUBE ─────────────────────────────
-        // Evitamos que el iframe de YouTube se entere de que la pestaña cambió
+        // Neutralizamos la pérdida de foco para que YouTube no se entere de que estás en otra pestaña
         try {
             Object.defineProperty(document, 'hidden', { get: () => false });
             Object.defineProperty(document, 'visibilityState', { get: () => 'visible' });
@@ -93,7 +92,7 @@
         }, true);
 
         const params = new URLSearchParams(window.location.search);
-        const videoId = params.get('v');
+        const initialVid = params.get('v');
         const wantsAutoplay = params.get('autoplay') === '1';
         const startTime = Number(params.get('t')) || 0;
 
@@ -105,7 +104,7 @@
         const errCode = document.getElementById('errCode');
         const errText = document.getElementById('errText');
 
-        let currentVid = videoId || null;
+        let currentVid = initialVid || null;
         let hasActiveError = false;
         let isReadyReported = false;
         let userWantsPlayback = wantsAutoplay;
@@ -186,10 +185,8 @@
             if (!player || hasActiveError) return;
             userWantsPlayback = true;
 
-            // 1. Comando directo al iframe de YouTube (ignora políticas del elemento HTML)
             sendDirectCommand('playVideo');
 
-            // 2. Comando a Vidstack
             try {
                 const prom = player.play();
                 if (prom && typeof prom.catch === 'function') {
@@ -208,31 +205,45 @@
             sendDirectCommand('seekTo', [target, true]);
         }
 
-        // ── Inicialización de Vidstack ─────────────────────────────────────────
+        function loadVideoDirectly(vid, timeSec, autoplay) {
+            currentVid = vid;
+            clearError();
+            isReadyReported = false;
+            userWantsPlayback = !!autoplay;
+            showSpinner();
+            videoCover.classList.remove('hidden');
+
+            var t = Number(timeSec) || 0;
+
+            // Intentamos cambio en caliente por la API de YouTube (permite iniciar en pestaña de fondo)
+            sendDirectCommand('loadVideoById', [{
+                videoId: vid,
+                startSeconds: t
+            }]);
+
+            // Asignamos también a Vidstack
+            player.src = 'youtube/' + vid;
+
+            const onLoaded = () => {
+                player.removeEventListener('can-play', onLoaded);
+                if (t > 0) forceSeek(t);
+
+                postToParent({
+                    type: 'ready',
+                    duration: Number(player.duration) || 0,
+                    time: Number(player.currentTime) || 0
+                });
+                isReadyReported = true;
+
+                if (autoplay) safePlay();
+                else hideSpinner();
+            };
+            player.addEventListener('can-play', onLoaded);
+        }
+
         if (player) {
-            if (videoId) {
-                showSpinner();
-                videoCover.classList.remove('hidden');
-                player.src = 'youtube/' + videoId;
-
-                const onCanPlay = () => {
-                    player.removeEventListener('can-play', onCanPlay);
-                    if (startTime > 0) forceSeek(startTime);
-                    
-                    postToParent({
-                        type: 'ready',
-                        duration: Number(player.duration) || 0,
-                        time: Number(player.currentTime) || 0
-                    });
-                    isReadyReported = true;
-
-                    if (wantsAutoplay) {
-                        safePlay();
-                    } else {
-                        hideSpinner();
-                    }
-                };
-                player.addEventListener('can-play', onCanPlay);
+            if (initialVid) {
+                loadVideoDirectly(initialVid, startTime, wantsAutoplay);
             } else {
                 hideSpinner();
             }
@@ -240,8 +251,6 @@
             player.addEventListener('playing', markPlaybackStarted);
             player.addEventListener('play', markPlaybackStarted);
 
-            // ANTI-PAUSA AL CAMBIAR DE PESTAÑA:
-            // Si YouTube se auto-pausa porque la pestaña quedó en segundo plano, forzar playVideo inmediato
             player.addEventListener('pause', () => {
                 if (userWantsPlayback && !hasActiveError) {
                     sendDirectCommand('playVideo');
@@ -280,7 +289,6 @@
             });
         }
 
-        // ── Comandos desde la Sala (room-music.js) ───────────────────────────
         window.addEventListener('message', (ev) => {
             if (typeof ev.data === 'string') {
                 if (ev.data.includes('onError')) {
@@ -289,7 +297,6 @@
                         if (ytData.event === 'onError' && ytData.info) triggerError(ytData.info);
                     } catch (e) {}
                 }
-                // Si YouTube avisa que pausó por cambio de pestaña, forzar reanudación
                 if (ev.data.includes('onStateChange')) {
                     try {
                         const ytData = JSON.parse(ev.data);
@@ -309,40 +316,7 @@
             switch (action) {
                 case 'load':
                     if (data.videoId) {
-                        if (currentVid === data.videoId && !hasActiveError && player.src) {
-                            if (typeof data.time === 'number') forceSeek(data.time);
-                            if (data.autoplay) safePlay();
-                            else {
-                                userWantsPlayback = false;
-                                try { player.pause(); } catch (e) {}
-                            }
-                            break;
-                        }
-
-                        clearError();
-                        currentVid = data.videoId;
-                        isReadyReported = false;
-                        userWantsPlayback = !!data.autoplay;
-                        showSpinner();
-                        videoCover.classList.remove('hidden');
-
-                        player.src = 'youtube/' + data.videoId;
-
-                        const onLoaded = () => {
-                            player.removeEventListener('can-play', onLoaded);
-                            if (typeof data.time === 'number' && data.time > 0) forceSeek(data.time);
-
-                            postToParent({
-                                type: 'ready',
-                                duration: Number(player.duration) || 0,
-                                time: Number(player.currentTime) || 0
-                            });
-                            isReadyReported = true;
-
-                            if (data.autoplay) safePlay();
-                            else hideSpinner();
-                        };
-                        player.addEventListener('can-play', onLoaded);
+                        loadVideoDirectly(data.videoId, data.time, data.autoplay);
                     }
                     break;
 
