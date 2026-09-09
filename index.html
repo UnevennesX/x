@@ -259,6 +259,9 @@
                     frame = provider.querySelector('iframe') || (provider.shadowRoot && provider.shadowRoot.querySelector('iframe'));
                 }
             }
+            if (!frame) {
+                frame = document.querySelector('iframe[src*="youtube"]');
+            }
             return frame;
         }
 
@@ -274,27 +277,54 @@
                     return true;
                 }
             } catch (e) {}
+
+            setTimeout(() => {
+                try {
+                    const retryFrame = getActiveYouTubeIframe();
+                    if (retryFrame && retryFrame.contentWindow) {
+                        retryFrame.contentWindow.postMessage(JSON.stringify({
+                            event: 'command',
+                            func: funcName,
+                            args: args || []
+                        }), '*');
+                    }
+                } catch (e) {}
+            }, 500);
+
             return false;
         }
+
+        let _playRetryTimer = null;
 
         function safePlay() {
             if (!player || hasActiveError) return;
             userWantsPlayback = true;
 
-            sendDirectCommand('playVideo');
-
-            try {
-                const prom = player.play();
-                if (prom && typeof prom.catch === 'function') {
-                    prom.catch(() => {
-                        player.muted = true;
-                        sendDirectCommand('mute');
-                        sendDirectCommand('playVideo');
-                    });
-                }
-            } catch (e) {
+            function attemptPlay() {
                 sendDirectCommand('playVideo');
+                try {
+                    const prom = player.play();
+                    if (prom && typeof prom.catch === 'function') {
+                        prom.catch(() => {
+                            player.muted = true;
+                            sendDirectCommand('mute');
+                            sendDirectCommand('playVideo');
+                        });
+                    }
+                } catch (e) {
+                    sendDirectCommand('playVideo');
+                }
             }
+
+            attemptPlay();
+
+            if (_playRetryTimer) clearTimeout(_playRetryTimer);
+            _playRetryTimer = setTimeout(() => {
+                if (!hasActiveError && !isPlayingConfirmed && userWantsPlayback) {
+                    log('safePlay retry — re-sending playVideo.');
+                    attemptPlay();
+                }
+            }, 2000);
         }
 
         function forceSeek(timeSec) {
@@ -357,7 +387,7 @@
                 if (autoplay) {
                     player.muted = true;
                     sendDirectCommand('mute');
-                    safePlay();
+                    setTimeout(() => safePlay(), 300);
                 } else {
                     hideSpinner();
                 }
