@@ -81,7 +81,6 @@
     <script>
         const LOG_ENDPOINT = "https://voice-eva.koyeb.app/api/video-error-log";
 
-        // Impedir que el navegador congele eventos de visibilidad internamente
         try {
             Object.defineProperty(document, 'hidden', { get: () => false });
             Object.defineProperty(document, 'visibilityState', { get: () => 'visible' });
@@ -116,6 +115,7 @@
         let hasActiveError = false;
         let isReadyReported = false;
         let isPlayingConfirmed = false;
+        let isMediaReady = false;
         let userWantsPlayback = wantsAutoplay;
         let loadWatchdogTimer = null;
         let _playRetryTimer = null;
@@ -180,7 +180,7 @@
             clearLoadWatchdog();
             loadWatchdogTimer = setTimeout(() => {
                 if (hasActiveError || isPlayingConfirmed) return;
-                log('Watchdog: Aún sin confirmar reproducción — reintentando play.');
+                log('Watchdog: Reintentando reproducción...');
                 if (userWantsPlayback) safePlay();
             }, LOAD_TIMEOUT_MS);
         }
@@ -209,45 +209,6 @@
             clearLoadWatchdog();
         }
 
-        function applyAudioSettings() {
-            if (desiredMuted) {
-                player.muted = true;
-                sendDirectCommand('mute');
-            } else {
-                player.muted = false;
-                sendDirectCommand('unMute');
-                sendDirectCommand('setVolume', [currentVolume]);
-            }
-            player.volume = currentVolume / 100;
-        }
-
-        function markPlaybackStarted() {
-            if (hasActiveError) return;
-            log('markPlaybackStarted: Video reproduciéndose de forma continua.');
-            isPlayingConfirmed = true;
-            clearLoadWatchdog();
-
-            if (_playRetryTimer) {
-                clearTimeout(_playRetryTimer);
-                _playRetryTimer = null;
-            }
-
-            hideSpinner();
-            videoCover.classList.add('hidden');
-            clearError();
-
-            applyAudioSettings();
-
-            if (!isReadyReported) {
-                isReadyReported = true;
-                postToParent({
-                    type: 'ready',
-                    duration: Number(player.duration) || 0,
-                    time: Number(player.currentTime) || 0
-                });
-            }
-        }
-
         function getActiveYouTubeIframe() {
             let frame = player.querySelector('iframe');
             if (!frame && player.shadowRoot) {
@@ -265,7 +226,6 @@
             return frame;
         }
 
-        // Envío directo de comandos al iframe de YouTube (sin bloqueos artificiales de flags)
         function sendDirectCommand(funcName, args) {
             try {
                 const frame = getActiveYouTubeIframe();
@@ -282,48 +242,77 @@
         }
 
         function safePlay() {
-            if (!player || hasActiveError) return;
+            if (!player || hasActiveError || !isMediaReady) return;
             userWantsPlayback = true;
 
-            // Orden directa a YouTube por si Vidstack está throttled en background
+            // Iniciar siempre silenciado si no se ha confirmado reproducción activa
+            if (!isPlayingConfirmed && !player.muted) {
+                player.muted = true;
+                sendDirectCommand('mute');
+            }
+
             sendDirectCommand('playVideo');
 
             try {
                 const prom = player.play();
                 if (prom && typeof prom.catch === 'function') {
-                    prom.catch((err) => {
-                        log('play() rechazado por background: ' + (err ? err.name : ''));
-                        // Bypass de autoplay silenciando temporalmente
+                    prom.catch(() => {
+                        // Respaldo inmediato vía iframe nativo
                         player.muted = true;
                         sendDirectCommand('mute');
                         sendDirectCommand('playVideo');
-                        player.play().then(() => {
-                            if (!desiredMuted) {
-                                setTimeout(() => {
-                                    player.muted = false;
-                                    sendDirectCommand('unMute');
-                                    sendDirectCommand('setVolume', [currentVolume]);
-                                }, 300);
-                            }
-                        }).catch(() => {});
                     });
                 }
             } catch (e) {}
 
             if (_playRetryTimer) clearTimeout(_playRetryTimer);
             _playRetryTimer = setTimeout(() => {
-                if (!hasActiveError && !isPlayingConfirmed && userWantsPlayback) {
-                    log('safePlay background retry...');
-                    sendDirectCommand('playVideo');
+                if (!hasActiveError && !isPlayingConfirmed && userWantsPlayback && isMediaReady) {
                     safePlay();
                 }
-            }, 1500);
+            }, 1800);
         }
 
         function forceSeek(timeSec) {
             const target = Math.max(0, Number(timeSec) || 0);
             try { player.currentTime = target; } catch (e) {}
             sendDirectCommand('seekTo', [target, true]);
+        }
+
+        function markPlaybackStarted() {
+            if (hasActiveError) return;
+            log('markPlaybackStarted: Reproducción activa confirmada.');
+            isPlayingConfirmed = true;
+            isMediaReady = true;
+            clearLoadWatchdog();
+
+            if (_playRetryTimer) {
+                clearTimeout(_playRetryTimer);
+                _playRetryTimer = null;
+            }
+
+            hideSpinner();
+            videoCover.classList.add('hidden');
+            clearError();
+
+            // Una vez que el stream ya está corriendo, se desmutea sin restricción de background
+            if (!desiredMuted) {
+                setTimeout(() => {
+                    player.muted = false;
+                    sendDirectCommand('unMute');
+                    sendDirectCommand('setVolume', [currentVolume]);
+                    player.volume = currentVolume / 100;
+                }, 200);
+            }
+
+            if (!isReadyReported) {
+                isReadyReported = true;
+                postToParent({
+                    type: 'ready',
+                    duration: Number(player.duration) || 0,
+                    time: Number(player.currentTime) || 0
+                });
+            }
         }
 
         function loadVideoDirectly(vid, timeSec, autoplay) {
@@ -333,6 +322,7 @@
             }
 
             currentVid = vid;
+            isMediaReady = false;
             clearError();
             hasActiveError = false;
             isPlayingConfirmed = false;
@@ -348,11 +338,9 @@
                 startLoadWatchdog();
             }
 
-            // Si se pide autoplay en background, iniciamos temporalmente silenciado para garantizar que arranque
-            if (autoplay && !desiredMuted) {
-                player.muted = true;
-                sendDirectCommand('mute');
-            }
+            // CRUCIAL: arrancar silenciado para que el navegador jamás rechace el play en background
+            player.muted = true;
+            sendDirectCommand('mute');
 
             player.src = 'youtube/' + vid;
 
@@ -360,6 +348,7 @@
             const fireReady = () => {
                 if (readyFired) return;
                 readyFired = true;
+                isMediaReady = true;
                 player.removeEventListener('can-play', onLoaded);
                 if (t > 0) forceSeek(t);
 
@@ -380,12 +369,11 @@
             const onLoaded = () => { fireReady(); };
             player.addEventListener('can-play', onLoaded, { once: true });
 
-            // Red de seguridad rápida para que no se congele si can-play se demora en pestañas ocultas
             setTimeout(() => {
                 if (!readyFired && !hasActiveError) {
                     fireReady();
                 }
-            }, 800);
+            }, 1200);
         }
 
         if (player) {
@@ -398,13 +386,14 @@
             player.addEventListener('playing', markPlaybackStarted);
 
             player.addEventListener('pause', () => {
-                if (userWantsPlayback && !hasActiveError) {
+                if (userWantsPlayback && !hasActiveError && isMediaReady) {
                     setTimeout(() => {
-                        if (userWantsPlayback && player.paused) {
-                            try { player.play(); } catch(e) {}
+                        if (userWantsPlayback && player.paused && isMediaReady) {
+                            const p = player.play();
+                            if (p && p.catch) p.catch(() => {});
                             sendDirectCommand('playVideo');
                         }
-                    }, 50);
+                    }, 100);
                     return;
                 }
                 postToParent({ type: 'paused' });
@@ -412,10 +401,6 @@
 
             player.addEventListener('time-update', () => {
                 if (player.currentTime > 0) hideSpinner();
-                
-                if (!player.paused && !desiredMuted && (player.muted || player.volume === 0)) {
-                    applyAudioSettings();
-                }
 
                 postToParent({
                     type: 'progress',
@@ -442,8 +427,8 @@
                 const msg = String(detail.message || detail || '');
                 const name = String(detail.name || '');
 
-                if (name === 'AbortError' || msg.includes('interrupted') || msg.includes('The play() request')) return;
-                if (name === 'NotAllowedError' || msg.includes('interact')) return;
+                if (name === 'AbortError' || msg.includes('interrupted') || msg.includes('play()')) return;
+                if (name === 'NotAllowedError' || msg.includes('interact') || msg.includes('not ready')) return;
 
                 const code = detail.code || 0;
                 if (code >= 4) {
@@ -455,16 +440,15 @@
 
         document.addEventListener('visibilitychange', () => {
             if (!document.hidden && !hasActiveError && !isPlayingConfirmed && currentVid) {
-                log('Pestaña visible — reiniciando watchdog de carga.');
                 startLoadWatchdog();
-                if (userWantsPlayback) safePlay();
+                if (userWantsPlayback && isMediaReady) safePlay();
             }
         });
 
         window.addEventListener('message', (ev) => {
             if (typeof ev.data === 'string') {
                 if (ev.data.includes('onReady')) {
-                    if (userWantsPlayback && !isPlayingConfirmed) {
+                    if (userWantsPlayback && !isPlayingConfirmed && isMediaReady) {
                         safePlay();
                     }
                 }
@@ -506,7 +490,7 @@
                 case 'play':
                 case 'keepalive':
                     userWantsPlayback = true;
-                    if (!hasActiveError) safePlay();
+                    if (!hasActiveError && isMediaReady) safePlay();
                     break;
                 case 'pause':
                     userWantsPlayback = false;
