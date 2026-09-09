@@ -349,8 +349,11 @@
 
             player.addEventListener('error', (ev) => {
                 const detail = ev && ev.detail;
-                const err = (detail && (detail.code || detail.message || detail.error)) || 'Playback Error';
-                triggerError(err);
+                const code = detail && (detail.code || 0);
+                if (code >= 4 || code === 0) {
+                    const err = (detail && (detail.message || detail.error)) || 'Playback Error';
+                    triggerError(err);
+                }
             });
         }
 
@@ -366,7 +369,7 @@
                 if (ev.data.includes('onStateChange')) {
                     try {
                         const ytData = JSON.parse(ev.data);
-                        if (ytData.info === 1) markPlaybackStarted();
+                        if (ytData.info === 1 || ytData.info === 3) markPlaybackStarted();
                         if (ytData.info === 2 && userWantsPlayback && !hasActiveError) {
                             sendDirectCommand('playVideo');
                         }
