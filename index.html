@@ -197,6 +197,13 @@
             videoCover.classList.add('hidden');
             clearError();
 
+            postToParent({
+                type: 'progress',
+                time: Number(player.currentTime) || 0,
+                duration: Number(player.duration) || 0,
+                playing: true
+            });
+
             if (!isReadyReported) {
                 isReadyReported = true;
                 postToParent({
