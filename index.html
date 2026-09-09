@@ -47,7 +47,7 @@
         .minimal-spinner.active { display: block !important; opacity: 1 !important; }
         @keyframes spin { to { transform: rotate(360deg); } }
         .minimal-error {
-            position: absolute; inset: 0; z-index: 100; background: #000000;
+            position: absolute; inset: 0; z-index: 9999; background: #000000;
             display: flex; flex-direction: column; align-items: center; justify-content: center;
             padding: 24px; text-align: center; opacity: 0; pointer-events: none;
             transition: opacity 0.25s ease;
@@ -106,6 +106,9 @@
         let isReadyReported = false;
         let userWantsPlayback = wantsAutoplay;
         let isVidstackInitialized = false;
+        let loadWatchdogTimer = null;
+        let isPlayingConfirmed = false;
+        const LOAD_TIMEOUT_MS = 12000;
 
         const ERRORS_MAP = {
             150: 'El autor bloqueó la reproducción externa o tiene restricciones de copyright.',
@@ -148,10 +151,45 @@
         function clearError() {
             hasActiveError = false;
             errorView.classList.remove('active');
+            clearLoadWatchdog();
+        }
+
+        function clearLoadWatchdog() {
+            if (loadWatchdogTimer) {
+                clearTimeout(loadWatchdogTimer);
+                loadWatchdogTimer = null;
+            }
+        }
+
+        function detectVidstackError() {
+            try {
+                if (player.error) {
+                    var e = player.error;
+                    return e.code || e.message || e;
+                }
+            } catch(ex) {}
+            try {
+                if (player.state && player.state.error) {
+                    var e = player.state.error;
+                    return e.code || e.message || e;
+                }
+            } catch(ex) {}
+            return null;
+        }
+
+        function startLoadWatchdog() {
+            clearLoadWatchdog();
+            loadWatchdogTimer = setTimeout(function() {
+                if (hasActiveError || isPlayingConfirmed) return;
+                var errCode = detectVidstackError();
+                triggerError(errCode || 'No se pudo reproducir este video. Restricciones de reproducción.');
+            }, LOAD_TIMEOUT_MS);
         }
 
         function markPlaybackStarted() {
             if (hasActiveError) return;
+            isPlayingConfirmed = true;
+            clearLoadWatchdog();
             hideSpinner();
             videoCover.classList.add('hidden');
             clearError();
@@ -224,9 +262,11 @@
             currentVid = vid;
             clearError();
             isReadyReported = false;
+            isPlayingConfirmed = false;
             userWantsPlayback = !!autoplay;
             showSpinner();
             videoCover.classList.remove('hidden');
+            if (autoplay) startLoadWatchdog();
 
             const t = Number(timeSec) || 0;
 
@@ -291,6 +331,10 @@
             });
 
             player.addEventListener('time-update', () => {
+                if (!hasActiveError && !isPlayingConfirmed && player.currentTime > 0) {
+                    isPlayingConfirmed = true;
+                    clearLoadWatchdog();
+                }
                 if (player.currentTime > 0) hideSpinner();
                 postToParent({
                     type: 'progress',
@@ -392,6 +436,7 @@
 
                 case 'stop':
                     userWantsPlayback = false;
+                    clearLoadWatchdog();
                     try {
                         player.pause();
                     } catch (e) {}
