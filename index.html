@@ -103,8 +103,14 @@
         let currentVid = initialVid || null;
         let hasActiveError = false;
         let isReadyReported = false;
+        let isPlayingConfirmed = false;
         let userWantsPlayback = wantsAutoplay;
         let isVidstackInitialized = false;
+
+        // VARIABLES DEL AUTO-REFRESCO
+        let autoReloadTimer = null;
+        let reloadAttempts = 0;
+        const MAX_RELOAD_ATTEMPTS = 3;
 
         const ERRORS_MAP = {
             150: 'El autor bloqueó la reproducción externa o tiene restricciones de copyright.',
@@ -113,6 +119,10 @@
             2: 'Identificador de video de YouTube no válido.',
             5: 'Error de decodificación en el reproductor HTML5.'
         };
+
+        function log(msg) {
+            console.log('[X-Player]', msg);
+        }
 
         function postToParent(data) {
             try {
@@ -131,6 +141,7 @@
         function triggerError(code) {
             if (hasActiveError) return;
             hasActiveError = true;
+            clearAutoReloadWatcher();
             hideSpinner();
             videoCover.classList.remove('hidden');
 
@@ -147,13 +158,62 @@
         function clearError() {
             hasActiveError = false;
             errorView.classList.remove('active');
+            clearAutoReloadWatcher();
         }
 
-        // SOLO SE OCULTA LA PANTALLA NEGRA SI REALMENTE ESTÁ SONANDO
+        // ==============================================================
+        // MECANISMO DE AUTO-REFRESCO (EL F5 INTERNO AUTOMÁTICO)
+        // ==============================================================
+        function startAutoReloadWatcher(vid, timeSec) {
+            clearAutoReloadWatcher();
+
+            autoReloadTimer = setTimeout(() => {
+                // Si el video ya está sonando o hay error, no hacemos nada
+                if (isPlayingConfirmed || hasActiveError) return;
+
+                if (reloadAttempts < MAX_RELOAD_ATTEMPTS) {
+                    reloadAttempts++;
+                    log(`[Auto-Refresco] Video trabado en el spinner. Aplicando F5 interno (Intento ${reloadAttempts}/${MAX_RELOAD_ATTEMPTS})...`);
+
+                    const iframe = getActiveYouTubeIframe();
+                    if (iframe) {
+                        // Forzamos la recarga del stream de YouTube
+                        sendDirectCommand('loadVideoById', [vid, Number(timeSec) || 0]);
+                        sendDirectCommand('playVideo');
+                    } else {
+                        player.src = '';
+                        setTimeout(() => {
+                            player.src = 'youtube/' + vid;
+                            safePlay();
+                        }, 50);
+                    }
+                    safePlay();
+
+                    // Vuelve a vigilar por si necesita otro empujón
+                    startAutoReloadWatcher(vid, timeSec);
+                } else {
+                    log('[Auto-Refresco] Se agotaron los reintentos. Mostrando error real.');
+                    triggerError(150);
+                }
+            }, 2500); // Espera 2.5 segundos antes de forzar el refresco interno
+        }
+
+        function clearAutoReloadWatcher() {
+            if (autoReloadTimer) {
+                clearTimeout(autoReloadTimer);
+                autoReloadTimer = null;
+            }
+        }
+
         function markPlaybackStarted() {
             if (hasActiveError) return;
+            log('markPlaybackStarted: Video reproduciéndose correctamente.');
+            isPlayingConfirmed = true;
+            clearAutoReloadWatcher();
+            reloadAttempts = 0;
+
             hideSpinner();
-            videoCover.classList.add('hidden'); // Aquí se destapa
+            videoCover.classList.add('hidden'); // Quita la pantalla negra
             clearError();
 
             if (!isReadyReported) {
@@ -222,19 +282,26 @@
         function loadVideoDirectly(vid, timeSec, autoplay) {
             currentVid = vid;
             clearError();
+            isPlayingConfirmed = false;
             isReadyReported = false;
             userWantsPlayback = !!autoplay;
+            reloadAttempts = 0;
+            
             showSpinner();
             videoCover.classList.remove('hidden');
 
             const t = Number(timeSec) || 0;
 
+            // Iniciamos la vigilancia del Auto-Refresco
+            if (autoplay) {
+                startAutoReloadWatcher(vid, t);
+            } else {
+                clearAutoReloadWatcher();
+            }
+
             const iframe = getActiveYouTubeIframe();
             if (isVidstackInitialized && iframe) {
-                sendDirectCommand('loadVideoById', [{
-                    videoId: vid,
-                    startSeconds: t
-                }]);
+                sendDirectCommand('loadVideoById', [vid, t]);
                 
                 if (autoplay) {
                     safePlay();
@@ -271,8 +338,7 @@
                 hideSpinner();
             }
 
-            // CORRECCIÓN CRÍTICA: Eliminamos el evento 'play' para no destapar la pantalla negra prematuramente.
-            // Solo escuchamos 'playing', que es cuando el video YA está reproduciéndose.
+            // Solo destapamos la pantalla cuando REALMENTE esté corriendo el video
             player.addEventListener('playing', markPlaybackStarted);
 
             player.addEventListener('pause', () => {
@@ -301,7 +367,7 @@
                 postToParent({ type: 'ended' });
             });
 
-            // Filtro de errores: Ignoramos abortos y promesas interrumpidas
+            // Filtro para ignorar advertencias y promesas canceladas
             player.addEventListener('error', (ev) => {
                 const detail = ev && ev.detail;
                 if (!detail) return;
@@ -336,7 +402,7 @@
                 if (ev.data.includes('onStateChange')) {
                     try {
                         const ytData = JSON.parse(ev.data);
-                        // Solo el estado 1 (PLAYING real) destapa la pantalla
+                        // Estado 1 = PLAYING (reproduciendo con éxito)
                         if (ytData.info === 1) {
                             markPlaybackStarted();
                         }
@@ -366,6 +432,7 @@
                     break;
                 case 'pause':
                     userWantsPlayback = false;
+                    clearAutoReloadWatcher();
                     try { player.pause(); } catch (e) {}
                     sendDirectCommand('pauseVideo');
                     hideSpinner();
@@ -392,6 +459,7 @@
                     break;
                 case 'stop':
                     userWantsPlayback = false;
+                    clearAutoReloadWatcher();
                     try { player.pause(); } catch (e) {}
                     sendDirectCommand('stopVideo');
                     clearError();
