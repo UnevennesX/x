@@ -110,14 +110,24 @@
         let userWantsPlayback = wantsAutoplay;
         let isVidstackInitialized = false;
         let loadWatchdogTimer = null;
+        let pendingSeek = startTime;
+        let desiredMuted = false;
+        let playRetries = 0;
+        let audioBlockedNotified = false;
         const LOAD_TIMEOUT_MS = 12000;
+        const MAX_PLAY_RETRIES = 3;
 
-        const ERRORS_MAP = {
-            150: 'El autor bloqueó la reproducción externa o tiene restricciones de copyright.',
-            101: 'El autor bloqueó la reproducción externa o tiene restricciones de copyright.',
-            100: 'El video fue eliminado o configurado como privado.',
-            2: 'Identificador de video de YouTube no válido.',
-            5: 'Error de decodificación en el reproductor HTML5.'
+        // Alcance de cada error, para que la sala distinga un video que nadie
+        // puede reproducir de un fallo que solo afecta a este dispositivo:
+        //   content = determinista para cualquier espectador
+        //   embed   = embed bloqueado o restricción regional (ambiguo)
+        //   local   = problema de este navegador o red
+        const YT_ERRORS = {
+            2:   { scope: 'content', msg: 'Identificador de video de YouTube no válido.' },
+            5:   { scope: 'local',   msg: 'Error de decodificación en el reproductor HTML5.' },
+            100: { scope: 'content', msg: 'El video fue eliminado o configurado como privado.' },
+            101: { scope: 'embed',   msg: 'El autor bloqueó la reproducción externa o el video está restringido en tu región.' },
+            150: { scope: 'embed',   msg: 'El autor bloqueó la reproducción externa o el video está restringido en tu región.' }
         };
 
         function log(msg) {
