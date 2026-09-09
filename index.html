@@ -174,9 +174,24 @@
             clearLoadWatchdog();
         }
 
+        // FUNCIÓN: Desmutea al primer toque del usuario sin pausar el video
+        function enableAudioOnInteraction() {
+            const unmuteHandler = () => {
+                log('Interacción detectada: activando sonido.');
+                player.muted = false;
+                sendDirectCommand('unMute');
+                window.removeEventListener('click', unmuteHandler);
+                window.removeEventListener('keydown', unmuteHandler);
+                window.removeEventListener('touchstart', unmuteHandler);
+            };
+            window.addEventListener('click', unmuteHandler, { once: true });
+            window.addEventListener('keydown', unmuteHandler, { once: true });
+            window.addEventListener('touchstart', unmuteHandler, { once: true });
+        }
+
         function markPlaybackStarted() {
             if (hasActiveError) return;
-            log('markPlaybackStarted: Video reproduciéndose.');
+            log('markPlaybackStarted: Video reproduciéndose de forma continua.');
             isPlayingConfirmed = true;
             clearLoadWatchdog();
 
@@ -184,13 +199,8 @@
             videoCover.classList.add('hidden'); // Quita la pantalla negra
             clearError();
 
-            // Desmuteo inmediato una vez que el motor ya está corriendo
-            if (userWantsPlayback) {
-                setTimeout(() => {
-                    player.muted = false;
-                    sendDirectCommand('unMute');
-                }, 150);
-            }
+            // Dejamos listo el desmuteo automático para el momento en que el usuario toque la pantalla
+            enableAudioOnInteraction();
 
             if (!isReadyReported) {
                 isReadyReported = true;
@@ -241,7 +251,6 @@
                 const prom = player.play();
                 if (prom && typeof prom.catch === 'function') {
                     prom.catch(() => {
-                        // Si el navegador intenta bloquear el play, aseguramos mute y forzamos arranque
                         player.muted = true;
                         sendDirectCommand('mute');
                         sendDirectCommand('playVideo');
@@ -276,7 +285,6 @@
 
             const iframe = getActiveYouTubeIframe();
             if (isVidstackInitialized && iframe) {
-                // Si requiere autoplay, arrancamos en mute para saltar el bloqueo de Chrome
                 if (autoplay) {
                     player.muted = true;
                     sendDirectCommand('mute');
@@ -327,10 +335,10 @@
                 hideSpinner();
             }
 
-            // Solo destapamos pantalla si realmente está sonando
             player.addEventListener('playing', markPlaybackStarted);
 
             player.addEventListener('pause', () => {
+                // Solo forzamos play si el usuario realmente quería que siguiera sonando
                 if (userWantsPlayback && !hasActiveError && isReadyReported) {
                     sendDirectCommand('playVideo');
                 }
@@ -356,7 +364,6 @@
                 postToParent({ type: 'ended' });
             });
 
-            // Filtro para ignorar advertencias de promesas canceladas
             player.addEventListener('error', (ev) => {
                 const detail = ev && ev.detail;
                 if (!detail) return;
@@ -391,11 +398,8 @@
                 if (ev.data.includes('onStateChange')) {
                     try {
                         const ytData = JSON.parse(ev.data);
-                        if (ytData.info === 1) { // 1 = PLAYING
+                        if (ytData.info === 1) {
                             markPlaybackStarted();
-                        }
-                        if (ytData.info === 2 && userWantsPlayback && !hasActiveError && isReadyReported) {
-                            sendDirectCommand('playVideo');
                         }
                     } catch (e) {}
                 }
