@@ -41,6 +41,25 @@
         }
         .minimal-spinner.active { display: block !important; opacity: 1 !important; }
         @keyframes spin { to { transform: rotate(360deg); } }
+        
+        /* NUEVO: Tu propio botón de Play minimalista */
+        .custom-play-btn {
+            position: absolute; z-index: 60; width: 56px; height: 56px;
+            background-color: #4c6ef5; border-radius: 50%;
+            display: none; align-items: center; justify-content: center;
+            cursor: pointer; opacity: 0; pointer-events: none;
+            transition: opacity 0.25s ease, transform 0.2s ease;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.5);
+        }
+        .custom-play-btn.active { display: flex !important; opacity: 1 !important; pointer-events: auto !important; }
+        .custom-play-btn:active { transform: scale(0.95); }
+        .play-icon {
+            width: 0; height: 0; border-style: solid;
+            border-width: 9px 0 9px 14px;
+            border-color: transparent transparent transparent #ffffff;
+            margin-left: 4px;
+        }
+
         .minimal-error {
             position: absolute; inset: 0; z-index: 100; background: #000000;
             display: flex; flex-direction: column; align-items: center; justify-content: center;
@@ -62,6 +81,11 @@
     <div id="playerHost">
         <div id="videoCover" class="video-cover"></div>
         <div id="loadingSpinner" class="minimal-spinner active"></div>
+        
+        <!-- NUEVO: Botón de Play que aparecerá si el navegador bloquea el Autoplay -->
+        <div id="customPlayBtn" class="custom-play-btn">
+            <div class="play-icon"></div>
+        </div>
 
         <div id="errorView" class="minimal-error">
             <span id="errCode" class="error-tag">ERROR DE REPRODUCCIÓN</span>
@@ -90,6 +114,7 @@
         const errorView = document.getElementById('errorView');
         const errCode = document.getElementById('errCode');
         const errText = document.getElementById('errText');
+        const playBtn = document.getElementById('customPlayBtn'); // Referencia al nuevo botón
 
         let player = null;
         let currentVid = initialVid || null;
@@ -97,16 +122,13 @@
         let hasActiveError = false;
         let isReadyReported = false;
         let userWantsPlayback = wantsAutoplay;
-        let usingDirectYT = false;
 
         var loadWatchdogTimer = null;
-        var playRetryInterval = null; // NUEVA VARIABLE PARA EL MARTILLO
+        var blockCheckTimer = null; // Temporizador nuevo para detectar bloqueo
         var isPlayingConfirmed = false;
         var LOAD_TIMEOUT_MS = 12000;
-        var ytMsgHandler = null;
         var ytBubbleHandler = null;
         var ytCaptureHandler = null;
-        var ytStateChangeRetry = null;
 
         const ERRORS_MAP = {
             150: 'El autor bloqueó la reproducción externa o tiene restricciones de copyright.',
@@ -117,13 +139,11 @@
         };
 
         function log(msg) {
-            console.log('[X-Player]', msg, 'vid=' + currentVid, 'err=' + hasActiveError, 'ready=' + isReadyReported, 'playing=' + isPlayingConfirmed);
+            console.log('[X-Player]', msg);
         }
 
         function postToParent(data) {
-            try {
-                window.parent.postMessage(Object.assign({ source: 'x-player', videoId: currentVid }, data), '*');
-            } catch (e) {}
+            try { window.parent.postMessage(Object.assign({ source: 'x-player', videoId: currentVid }, data), '*'); } catch (e) {}
         }
 
         function showSpinner() {
@@ -134,25 +154,19 @@
             spinner.classList.remove('active');
         }
 
-        function clearLoadWatchdog() {
-            if (loadWatchdogTimer) {
-                clearTimeout(loadWatchdogTimer);
-                loadWatchdogTimer = null;
-            }
+        function clearTimers() {
+            if (loadWatchdogTimer) { clearTimeout(loadWatchdogTimer); loadWatchdogTimer = null; }
+            if (blockCheckTimer) { clearTimeout(blockCheckTimer); blockCheckTimer = null; }
         }
 
-        function clearPlayRetry() {
-            if (playRetryInterval) {
-                clearInterval(playRetryInterval);
-                playRetryInterval = null;
-            }
-        }
-
-        // Se mantiene tu lógica original del 150 si después de 12 seg todo falló
         function startLoadWatchdog() {
-            clearLoadWatchdog();
+            clearTimers();
             loadWatchdogTimer = setTimeout(function() {
                 if (hasActiveError || isPlayingConfirmed) return;
+                
+                // Si nuestro botón de Play está visible, NO ES UN ERROR, simplemente el usuario no le ha dado clic aún.
+                if (playBtn.classList.contains('active')) return;
+
                 log('watchdog FIRED - Fallo total tras 12 segundos');
                 var detectedErr = detectVidstackError();
                 triggerError(detectedErr || 150); 
@@ -161,18 +175,8 @@
 
         function detectVidstackError() {
             if (!player) return null;
-            try {
-                if (player.error) {
-                    var e = player.error;
-                    return e.code || e.message || e;
-                }
-            } catch(ex) {}
-            try {
-                if (player.state && player.state.error) {
-                    var e = player.state.error;
-                    return e.code || e.message || e;
-                }
-            } catch(ex) {}
+            try { if (player.error) return player.error.code || player.error.message || player.error; } catch(ex) {}
+            try { if (player.state && player.state.error) return player.state.error.code || player.state.error.message || player.state.error; } catch(ex) {}
             return null;
         }
 
@@ -180,9 +184,9 @@
             if (hasActiveError) return;
             log('triggerError: ' + code);
             hasActiveError = true;
-            clearLoadWatchdog();
-            clearPlayRetry();
+            clearTimers();
             hideSpinner();
+            playBtn.classList.remove('active');
             videoCover.classList.remove('hidden');
 
             const num = Number(code);
@@ -191,28 +195,22 @@
             errCode.textContent = !isNaN(num) ? 'ERROR ' + num : 'ERROR';
             errText.textContent = msg;
             errorView.classList.add('active');
-
             postToParent({ type: 'error', code: code, message: msg });
         }
 
         function clearError() {
             hasActiveError = false;
             errorView.classList.remove('active');
-            clearLoadWatchdog();
-            clearPlayRetry();
+            clearTimers();
         }
 
         function getActiveYouTubeIframe() {
             if (!player) return null;
             let frame = player.querySelector('iframe');
-            if (!frame && player.shadowRoot) {
-                frame = player.shadowRoot.querySelector('iframe');
-            }
+            if (!frame && player.shadowRoot) frame = player.shadowRoot.querySelector('iframe');
             if (!frame) {
                 const provider = player.querySelector('media-provider');
-                if (provider) {
-                    frame = provider.querySelector('iframe') || (provider.shadowRoot && provider.shadowRoot.querySelector('iframe'));
-                }
+                if (provider) frame = provider.querySelector('iframe') || (provider.shadowRoot && provider.shadowRoot.querySelector('iframe'));
             }
             return frame;
         }
@@ -221,11 +219,7 @@
             try {
                 const frame = getActiveYouTubeIframe();
                 if (frame && frame.contentWindow) {
-                    frame.contentWindow.postMessage(JSON.stringify({
-                        event: 'command',
-                        func: funcName,
-                        args: args || []
-                    }), '*');
+                    frame.contentWindow.postMessage(JSON.stringify({ event: 'command', func: funcName, args: args || [] }), '*');
                     return true;
                 }
             } catch (e) {}
@@ -246,6 +240,14 @@
             }
         }
 
+        // EVENTO DEL BOTÓN DE PLAY CREADO POR NOSOTROS
+        playBtn.addEventListener('click', function() {
+            log('Clic manual del usuario recibido, forzando play');
+            playBtn.classList.remove('active');
+            showSpinner();
+            safePlay(); // Como este comando ocurre dentro de un click, el navegador lo dejará pasar SIEMPRE.
+        });
+
         function forceSeek(timeSec) {
             const target = Math.max(0, Number(timeSec) || 0);
             if (player) { try { player.currentTime = target; } catch (e) {} }
@@ -254,13 +256,13 @@
 
         function markPlaybackStarted() {
             if (hasActiveError) return;
-            log('markPlaybackStarted');
+            log('markPlaybackStarted - Éxito!');
             isPlayingConfirmed = true;
-            clearLoadWatchdog();
-            clearPlayRetry(); // Al reproducir con éxito, paramos el martillo
+            clearTimers();
             
             hideSpinner();
-            videoCover.classList.add('hidden'); // Aquí es donde tu capa negra desaparece, tal como lo pediste
+            playBtn.classList.remove('active');
+            videoCover.classList.add('hidden'); // ADIÓS PANTALLA NEGRA
             clearError();
 
             postToParent({
@@ -281,13 +283,12 @@
         }
 
         function destroyPlayer() {
-            if (ytStateChangeRetry) { clearTimeout(ytStateChangeRetry); ytStateChangeRetry = null; }
             playerVid = null;
-            clearPlayRetry();
+            clearTimers();
+            playBtn.classList.remove('active');
             if (player) {
                 try { player.pause(); } catch(e) {}
                 try { player.removeAttribute('src'); } catch(e) {}
-                try { player.load(); } catch(e) {}
                 try { player.remove(); } catch(e) {}
                 player = null;
             }
@@ -298,100 +299,68 @@
             playerVid = vid;
 
             var mp = document.createElement('media-player');
-            mp.id = 'rmExternalPlayer';
             mp.className = 'vds-player';
             mp.setAttribute('load', 'eager');
             mp.setAttribute('stream-type', 'on-demand');
             mp.setAttribute('log-level', 'silent');
             mp.setAttribute('crossorigin', '');
             mp.setAttribute('playsinline', '');
-            
-            // Asignamos autoplay interno para mayor compatibilidad
             if (autoplay) mp.setAttribute('autoplay', '');
-
-            mp.setAttribute('tabindex', '0');
-            mp.setAttribute('role', 'region');
-            mp.setAttribute('aria-label', 'Video Player');
             mp.style.cssText = 'position:absolute;top:0;left:0;width:100%;height:100%;background:#000;';
 
             var prov = document.createElement('media-provider');
             prov.setAttribute('keep-alive', '');
             mp.appendChild(prov);
-
             playerHost.appendChild(mp);
             player = mp;
 
             mp.addEventListener('playing', function() {
                 if (playerVid !== currentVid) return;
-                log('EVENT: playing');
                 markPlaybackStarted();
             });
 
             mp.addEventListener('pause', function() {
                 if (playerVid !== currentVid) return;
-                log('EVENT: pause userWants=' + userWantsPlayback + ' err=' + hasActiveError);
                 if (userWantsPlayback && !hasActiveError) {
                     sendDirectCommand('playVideo');
-                    setTimeout(function() {
-                        if (userWantsPlayback && player && player.paused) {
-                            safePlay();
-                        }
-                    }, 100);
+                    setTimeout(function() { if (userWantsPlayback && player && player.paused) safePlay(); }, 100);
                 }
             });
 
             mp.addEventListener('time-update', function() {
                 if (playerVid !== currentVid) return;
-                var dur = Number(player ? player.duration : 0) || 0;
-                var isPlaying = player ? !player.paused : false;
                 postToParent({
                     type: 'progress',
                     time: Number(player ? player.currentTime : 0) || 0,
-                    duration: dur,
-                    playing: isPlaying
+                    duration: Number(player ? player.duration : 0) || 0,
+                    playing: player ? !player.paused : false
                 });
-            });
-
-            mp.addEventListener('loaded-metadata', function() {
-                if (playerVid !== currentVid) return;
-                var dur = Number(player ? player.duration : 0) || 0;
-                if (dur > 0) postToParent({ type: 'duration', duration: dur });
             });
 
             mp.addEventListener('ended', function() {
                 if (playerVid !== currentVid) return;
-                log('EVENT: ended');
                 userWantsPlayback = false;
                 postToParent({ type: 'ended' });
             });
 
-            // Hemos quitado "code === 0" para evitar falsos positivos
             mp.addEventListener('error', function(ev) {
                 if (playerVid !== currentVid) return;
-                var detail = ev && ev.detail;
-                var code = detail && (detail.code || 0);
-                log('EVENT: error code=' + code);
-                
-                if (code >= 4) {
-                    var err = (detail && (detail.message || detail.error)) || 'Playback Error';
-                    triggerError(err);
-                }
+                var code = (ev && ev.detail && ev.detail.code) || 0;
+                if (code >= 4) triggerError((ev.detail && (ev.detail.message || ev.detail.error)) || 'Playback Error');
             });
 
             mp.src = 'youtube/' + vid;
-            log('createPlayer: player.src set to youtube/' + vid);
         }
 
         function loadVideoDirectly(vid, timeSec, autoplay) {
-            log('loadVideoDirectly: vid=' + vid + ' time=' + timeSec + ' autoplay=' + autoplay);
             currentVid = vid;
             isPlayingConfirmed = false;
             isReadyReported = false;
             userWantsPlayback = !!autoplay;
-            usingDirectYT = false;
             
             showSpinner();
-            videoCover.classList.remove('hidden');
+            playBtn.classList.remove('active');
+            videoCover.classList.remove('hidden'); // Activa TU pantalla negra
             errorView.classList.remove('active');
             hasActiveError = false;
             
@@ -400,35 +369,27 @@
             var t = Number(timeSec) || 0;
 
             var onCanPlay = function() {
-                log('can-play fired for ' + vid);
                 player.removeEventListener('can-play', onCanPlay);
                 if (t > 0) forceSeek(t);
-                postToParent({
-                    type: 'ready',
-                    duration: Number(player.duration) || 0,
-                    time: Number(player.currentTime) || 0
-                });
+                postToParent({ type: 'ready', duration: Number(player.duration) || 0, time: Number(player.currentTime) || 0 });
                 isReadyReported = true;
                 
                 if (autoplay) {
                     safePlay();
                     
-                    // ============================================
-                    // EL MARTILLO: Si se pierde la orden de play original, 
-                    // le insistimos cada 1 segundo.
-                    // ============================================
-                    clearPlayRetry();
-                    playRetryInterval = setInterval(function() {
-                        if (!isPlayingConfirmed && userWantsPlayback && !hasActiveError) {
-                            log('El video sigue sin arrancar... forzando Play de nuevo.');
-                            safePlay();
-                        } else {
-                            clearPlayRetry();
+                    // NUEVA LÓGICA VITAL: Si a los 3 segundos no arrancó, el navegador lo bloqueó.
+                    // Paramos el watchdog, ocultamos el spinner y sacamos TU botón de play.
+                    blockCheckTimer = setTimeout(function() {
+                        if (!isPlayingConfirmed && !hasActiveError) {
+                            log('El navegador bloqueó el autoplay en silencio. Pidiendo clic al usuario.');
+                            clearTimers(); // Evita que salte el error 150 falso a los 12 segs
+                            hideSpinner();
+                            playBtn.classList.add('active');
                         }
-                    }, 1000);
-                    
+                    }, 3000); 
                 } else {
                     hideSpinner();
+                    playBtn.classList.add('active'); // Si no pidieron autoplay, mostramos el botón
                 }
             };
 
@@ -436,117 +397,47 @@
             player.addEventListener('can-play', onCanPlay);
         }
 
-        if (ytBubbleHandler) window.removeEventListener('message', ytBubbleHandler);
-        if (ytCaptureHandler) window.removeEventListener('message', ytCaptureHandler, true);
-
         ytBubbleHandler = function(ev) {
             if (typeof ev.data === 'string') {
                 if (ev.data.indexOf('onError') !== -1) {
                     try {
                         var ytData = JSON.parse(ev.data);
-                        if (ytData.event === 'onError' && ytData.info) {
-                            log('YT onError: ' + ytData.info);
-                            if (playerVid !== currentVid) return;
-                            triggerError(ytData.info);
-                        }
+                        if (ytData.event === 'onError' && ytData.info && playerVid === currentVid) triggerError(ytData.info);
                     } catch(e) {}
                 }
                 if (ev.data.indexOf('onStateChange') !== -1) {
                     try {
                         var ytData = JSON.parse(ev.data);
-                        log('YT onStateChange: ' + ytData.info);
                         if (playerVid !== currentVid) return;
                         if (ytData.info === 1 || ytData.info === 3) markPlaybackStarted();
-                        if (ytData.info === 2 && userWantsPlayback && !hasActiveError) {
-                            sendDirectCommand('playVideo');
-                        }
-                    } catch(e) {}
-                }
-                if (ev.data.indexOf('infoDelivery') !== -1) {
-                    try {
-                        var ytData = JSON.parse(ev.data);
-                        if (playerVid !== currentVid) return;
-                        if (ytData.info && typeof ytData.info.duration === 'number' && ytData.info.duration > 0) {
-                            postToParent({ type: 'duration', duration: ytData.info.duration });
-                        }
                     } catch(e) {}
                 }
                 return;
             }
-
             var data = ev.data;
             if (!data || typeof data !== 'object' || data.source !== 'voice-eva') return;
 
-            var action = data.cmd || data.type;
-
-            switch (action) {
-                case 'load':
-                    if (data.videoId) {
-                        loadVideoDirectly(data.videoId, data.time, data.autoplay);
-                    }
-                    break;
-                case 'play':
-                case 'keepalive':
-                    userWantsPlayback = true;
-                    if (!hasActiveError) safePlay();
-                    break;
-                case 'pause':
-                    userWantsPlayback = false;
-                    if (player) try { player.pause(); } catch(e) {}
-                    sendDirectCommand('pauseVideo');
-                    hideSpinner();
-                    break;
-                case 'seek':
-                    if (typeof data.time !== 'undefined') forceSeek(Number(data.time));
-                    break;
-                case 'setVolume':
-                    if (typeof data.volume !== 'undefined') {
-                        var v = Math.max(0, Math.min(100, Number(data.volume)));
-                        if (player) player.volume = v / 100;
-                        sendDirectCommand('setVolume', [v]);
-                    }
-                    break;
-                case 'mute':
-                    if (player) player.muted = true;
-                    sendDirectCommand('mute');
-                    break;
-                case 'unmute':
-                    if (player) player.muted = false;
-                    sendDirectCommand('unMute');
-                    break;
-                case 'stop':
-                    userWantsPlayback = false;
-                    isPlayingConfirmed = false;
-                    clearLoadWatchdog();
-                    clearPlayRetry();
-                    destroyPlayer();
-                    clearError();
-                    hideSpinner();
-                    videoCover.classList.remove('hidden');
-                    break;
+            switch (data.cmd || data.type) {
+                case 'load': if (data.videoId) loadVideoDirectly(data.videoId, data.time, data.autoplay); break;
+                case 'play': userWantsPlayback = true; if (!hasActiveError) safePlay(); break;
+                case 'pause': userWantsPlayback = false; if (player) try { player.pause(); } catch(e) {} sendDirectCommand('pauseVideo'); break;
+                case 'seek': if (typeof data.time !== 'undefined') forceSeek(Number(data.time)); break;
+                case 'setVolume': if (typeof data.volume !== 'undefined') { var v = Math.max(0, Math.min(100, Number(data.volume))); if (player) player.volume = v/100; sendDirectCommand('setVolume', [v]); } break;
+                case 'mute': if (player) player.muted = true; sendDirectCommand('mute'); break;
+                case 'unmute': if (player) player.muted = false; sendDirectCommand('unMute'); break;
+                case 'stop': userWantsPlayback = false; isPlayingConfirmed = false; destroyPlayer(); clearError(); hideSpinner(); videoCover.classList.remove('hidden'); break;
             }
         };
         window.addEventListener('message', ytBubbleHandler);
 
         ytCaptureHandler = function(ev) {
-            if (hasActiveError) return;
-            if (playerVid !== currentVid) return;
-            if (typeof ev.data !== 'string') return;
-            if (ev.data.indexOf('onError') === -1) return;
-            try {
-                var ytData = JSON.parse(ev.data);
-                if (ytData.event === 'onError' && ytData.info) {
-                    triggerError(ytData.info);
-                }
-            } catch(e) {}
+            if (hasActiveError || playerVid !== currentVid || typeof ev.data !== 'string' || ev.data.indexOf('onError') === -1) return;
+            try { var ytData = JSON.parse(ev.data); if (ytData.event === 'onError' && ytData.info) triggerError(ytData.info); } catch(e) {}
         };
         window.addEventListener('message', ytCaptureHandler, true);
 
-        if (initialVid) {
-            loadVideoDirectly(initialVid, startTime, wantsAutoplay);
-        } else {
-            hideSpinner();
-        }
+        if (initialVid) loadVideoDirectly(initialVid, startTime, wantsAutoplay);
+        else hideSpinner();
     </script>
 </body>
 </html>
