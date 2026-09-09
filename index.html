@@ -176,19 +176,8 @@
 
         function startLoadWatchdog() {
             clearLoadWatchdog();
-            // NO iniciar watchdog si el tab está en background — los timers están
-            // throttled y dispararía un error falso. Iniciar cuando vuelva a visible.
-            if (document.hidden) {
-                log('Watchdog DEFERRED (tab hidden).');
-                return;
-            }
             loadWatchdogTimer = setTimeout(() => {
                 if (hasActiveError || isPlayingConfirmed) return;
-                if (document.hidden) {
-                    log('Watchdog DEFERRED (tab hidden at fire time). Re-programming.');
-                    startLoadWatchdog();
-                    return;
-                }
                 log('Watchdog: Tiempo de espera agotado (12s).');
                 triggerError(150);
             }, LOAD_TIMEOUT_MS);
