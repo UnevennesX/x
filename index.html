@@ -46,6 +46,19 @@
         }
         .minimal-spinner.active { display: block !important; opacity: 1 !important; }
         @keyframes spin { to { transform: rotate(360deg); } }
+
+        /* Botón flotante para activar el sonido */
+        .unmute-badge {
+            position: absolute; top: 16px; right: 16px; z-index: 40;
+            background: rgba(0, 0, 0, 0.75); border: 1px solid rgba(255, 255, 255, 0.2);
+            color: #ffffff; padding: 8px 14px; border-radius: 20px;
+            font-size: 12px; font-weight: 500; cursor: pointer;
+            display: none; align-items: center; gap: 6px;
+            backdrop-filter: blur(4px); transition: opacity 0.2s, transform 0.2s;
+        }
+        .unmute-badge.active { display: flex !important; }
+        .unmute-badge:hover { background: rgba(76, 110, 245, 0.9); transform: scale(1.03); }
+
         .minimal-error {
             position: absolute; inset: 0; z-index: 100; background: #000000;
             display: flex; flex-direction: column; align-items: center; justify-content: center;
@@ -67,6 +80,11 @@
     <div id="playerHost">
         <div id="videoCover" class="video-cover"></div>
         <div id="loadingSpinner" class="minimal-spinner active"></div>
+
+        <!-- Botón para desmutear con un clic -->
+        <div id="unmuteBadge" class="unmute-badge">
+            <span>🔇 Activar sonido</span>
+        </div>
 
         <div id="errorView" class="minimal-error">
             <span id="errCode" class="error-tag">ERROR DE REPRODUCCIÓN</span>
@@ -96,6 +114,7 @@
         const player = document.getElementById('rmExternalPlayer');
         const videoCover = document.getElementById('videoCover');
         const spinner = document.getElementById('loadingSpinner');
+        const unmuteBadge = document.getElementById('unmuteBadge');
         const errorView = document.getElementById('errorView');
         const errCode = document.getElementById('errCode');
         const errText = document.getElementById('errText');
@@ -156,6 +175,7 @@
             hasActiveError = true;
             clearLoadWatchdog();
             hideSpinner();
+            unmuteBadge.classList.remove('active');
             videoCover.classList.remove('hidden');
 
             const num = Number(code);
@@ -174,19 +194,24 @@
             clearLoadWatchdog();
         }
 
-        function enableAudioOnInteraction() {
-            const unmuteHandler = () => {
-                log('Interacción recibida: asegurando sonido activado.');
-                player.muted = false;
-                sendDirectCommand('unMute');
-                window.removeEventListener('click', unmuteHandler);
-                window.removeEventListener('keydown', unmuteHandler);
-                window.removeEventListener('touchstart', unmuteHandler);
-            };
-            window.addEventListener('click', unmuteHandler, { once: true });
-            window.addEventListener('keydown', unmuteHandler, { once: true });
-            window.addEventListener('touchstart', unmuteHandler, { once: true });
+        // Activa el sonido y oculta el badge
+        function doUnmute() {
+            player.muted = false;
+            sendDirectCommand('unMute');
+            unmuteBadge.classList.remove('active');
         }
+
+        unmuteBadge.addEventListener('click', (e) => {
+            e.stopPropagation();
+            doUnmute();
+        });
+
+        // Al hacer clic en cualquier parte de la pantalla, también se activa el sonido
+        window.addEventListener('click', () => {
+            if (player && player.muted) {
+                doUnmute();
+            }
+        });
 
         function markPlaybackStarted() {
             if (hasActiveError) return;
@@ -198,7 +223,10 @@
             videoCover.classList.add('hidden'); // Quita la pantalla negra
             clearError();
 
-            enableAudioOnInteraction();
+            // Mostramos el aviso de activar sonido si el video arrancó silenciado
+            if (player.muted) {
+                unmuteBadge.classList.add('active');
+            }
 
             if (!isReadyReported) {
                 isReadyReported = true;
@@ -239,24 +267,16 @@
             return false;
         }
 
-        // REPRODUCCIÓN INTELIGENTE CON SONIDO
         function safePlay() {
             if (!player || hasActiveError) return;
             userWantsPlayback = true;
-
-            // Intentamos reproducir primero CON SONIDO
             sendDirectCommand('playVideo');
 
             try {
                 const prom = player.play();
                 if (prom && typeof prom.catch === 'function') {
-                    prom.catch((err) => {
-                        log('Navegador rechazó el audio de arranque. Muteando para salvar reproducción: ' + err);
-                        // Solo si el navegador da error por sonido, usamos mute de salvavidas
-                        player.muted = true;
-                        sendDirectCommand('mute');
+                    prom.catch(() => {
                         sendDirectCommand('playVideo');
-                        player.play().catch(() => {});
                     });
                 }
             } catch (e) {
@@ -288,9 +308,11 @@
 
             const iframe = getActiveYouTubeIframe();
             if (isVidstackInitialized && iframe) {
-                // Arranca CON SONIDO por defecto
-                player.muted = false;
-                sendDirectCommand('unMute');
+                // Autoplay con mute inicial garantizado
+                if (autoplay) {
+                    player.muted = true;
+                    sendDirectCommand('mute');
+                }
                 
                 sendDirectCommand('loadVideoById', [vid, t]);
                 
@@ -303,9 +325,9 @@
             }
 
             isVidstackInitialized = true;
-            
-            // Arranca CON SONIDO por defecto
-            player.muted = false;
+            if (autoplay) {
+                player.muted = true;
+            }
             player.src = 'youtube/' + vid;
 
             const onLoaded = () => {
@@ -320,8 +342,8 @@
                 isReadyReported = true;
 
                 if (autoplay) {
-                    player.muted = false;
-                    sendDirectCommand('unMute');
+                    player.muted = true;
+                    sendDirectCommand('mute');
                     safePlay();
                 } else {
                     hideSpinner();
@@ -340,13 +362,7 @@
             player.addEventListener('playing', markPlaybackStarted);
 
             player.addEventListener('pause', () => {
-                // Si se pausa durante el arranque (por rechazo de sonido), muteamos para forzar que ruede
-                if (userWantsPlayback && !hasActiveError && !isPlayingConfirmed) {
-                    log('Pausa durante el arranque. Aplicando mute para desbloquear...');
-                    player.muted = true;
-                    sendDirectCommand('mute');
-                    sendDirectCommand('playVideo');
-                } else if (userWantsPlayback && !hasActiveError && isReadyReported) {
+                if (userWantsPlayback && !hasActiveError && isReadyReported) {
                     sendDirectCommand('playVideo');
                 }
             });
@@ -452,12 +468,12 @@
                     sendDirectCommand('mute');
                     break;
                 case 'unmute':
-                    player.muted = false;
-                    sendDirectCommand('unMute');
+                    doUnmute();
                     break;
                 case 'stop':
                     userWantsPlayback = false;
                     clearLoadWatchdog();
+                    unmuteBadge.classList.remove('active');
                     try { player.pause(); } catch (e) {}
                     sendDirectCommand('stopVideo');
                     clearError();
