@@ -174,10 +174,9 @@
             clearLoadWatchdog();
         }
 
-        // FUNCIÓN: Desmutea al primer toque del usuario sin pausar el video
         function enableAudioOnInteraction() {
             const unmuteHandler = () => {
-                log('Interacción detectada: activando sonido.');
+                log('Interacción recibida: asegurando sonido activado.');
                 player.muted = false;
                 sendDirectCommand('unMute');
                 window.removeEventListener('click', unmuteHandler);
@@ -191,7 +190,7 @@
 
         function markPlaybackStarted() {
             if (hasActiveError) return;
-            log('markPlaybackStarted: Video reproduciéndose de forma continua.');
+            log('markPlaybackStarted: Video reproduciéndose.');
             isPlayingConfirmed = true;
             clearLoadWatchdog();
 
@@ -199,7 +198,6 @@
             videoCover.classList.add('hidden'); // Quita la pantalla negra
             clearError();
 
-            // Dejamos listo el desmuteo automático para el momento en que el usuario toque la pantalla
             enableAudioOnInteraction();
 
             if (!isReadyReported) {
@@ -241,19 +239,24 @@
             return false;
         }
 
+        // REPRODUCCIÓN INTELIGENTE CON SONIDO
         function safePlay() {
             if (!player || hasActiveError) return;
             userWantsPlayback = true;
 
+            // Intentamos reproducir primero CON SONIDO
             sendDirectCommand('playVideo');
 
             try {
                 const prom = player.play();
                 if (prom && typeof prom.catch === 'function') {
-                    prom.catch(() => {
+                    prom.catch((err) => {
+                        log('Navegador rechazó el audio de arranque. Muteando para salvar reproducción: ' + err);
+                        // Solo si el navegador da error por sonido, usamos mute de salvavidas
                         player.muted = true;
                         sendDirectCommand('mute');
                         sendDirectCommand('playVideo');
+                        player.play().catch(() => {});
                     });
                 }
             } catch (e) {
@@ -285,10 +288,9 @@
 
             const iframe = getActiveYouTubeIframe();
             if (isVidstackInitialized && iframe) {
-                if (autoplay) {
-                    player.muted = true;
-                    sendDirectCommand('mute');
-                }
+                // Arranca CON SONIDO por defecto
+                player.muted = false;
+                sendDirectCommand('unMute');
                 
                 sendDirectCommand('loadVideoById', [vid, t]);
                 
@@ -301,9 +303,9 @@
             }
 
             isVidstackInitialized = true;
-            if (autoplay) {
-                player.muted = true;
-            }
+            
+            // Arranca CON SONIDO por defecto
+            player.muted = false;
             player.src = 'youtube/' + vid;
 
             const onLoaded = () => {
@@ -318,8 +320,8 @@
                 isReadyReported = true;
 
                 if (autoplay) {
-                    player.muted = true;
-                    sendDirectCommand('mute');
+                    player.muted = false;
+                    sendDirectCommand('unMute');
                     safePlay();
                 } else {
                     hideSpinner();
@@ -338,8 +340,13 @@
             player.addEventListener('playing', markPlaybackStarted);
 
             player.addEventListener('pause', () => {
-                // Solo forzamos play si el usuario realmente quería que siguiera sonando
-                if (userWantsPlayback && !hasActiveError && isReadyReported) {
+                // Si se pausa durante el arranque (por rechazo de sonido), muteamos para forzar que ruede
+                if (userWantsPlayback && !hasActiveError && !isPlayingConfirmed) {
+                    log('Pausa durante el arranque. Aplicando mute para desbloquear...');
+                    player.muted = true;
+                    sendDirectCommand('mute');
+                    sendDirectCommand('playVideo');
+                } else if (userWantsPlayback && !hasActiveError && isReadyReported) {
                     sendDirectCommand('playVideo');
                 }
             });
