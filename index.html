@@ -81,7 +81,6 @@
     <script>
         const LOG_ENDPOINT = "https://voice-eva.koyeb.app/api/video-error-log";
 
-        // ── ANTI-SUSPENSIÓN: Evitar que Chromium detecte la pestaña como oculta ──
         try {
             Object.defineProperty(document, 'hidden', { get: () => false });
             Object.defineProperty(document, 'visibilityState', { get: () => 'visible' });
@@ -117,6 +116,7 @@
         let isReadyReported = false;
         let isPlayingConfirmed = false;
         let userWantsPlayback = wantsAutoplay;
+        let isYTReady = false; // Flag para proteger a YouTube de comandos prematuros
         let loadWatchdogTimer = null;
         const LOAD_TIMEOUT_MS = 12000;
 
@@ -208,7 +208,6 @@
             clearLoadWatchdog();
         }
 
-        // ── RESTAURACIÓN DE AUDIO REAL ──
         function applyAudioSettings() {
             if (desiredMuted) {
                 player.muted = true;
@@ -225,13 +224,13 @@
             if (hasActiveError) return;
             log('markPlaybackStarted: Video reproduciéndose de forma continua.');
             isPlayingConfirmed = true;
+            isYTReady = true;
             clearLoadWatchdog();
 
             hideSpinner();
             videoCover.classList.add('hidden');
             clearError();
 
-            // Desmuteo automático inmediato: ahora que el video ya rueda, Chromium permite audio
             applyAudioSettings();
 
             if (!isReadyReported) {
@@ -261,7 +260,9 @@
             return frame;
         }
 
+        // PREVENCIÓN DE CRASH: No enviar comandos directos antes de que YouTube esté listo
         function sendDirectCommand(funcName, args) {
+            if (!isYTReady && funcName !== 'mute') return false;
             try {
                 const frame = getActiveYouTubeIframe();
                 if (frame && frame.contentWindow) {
@@ -282,38 +283,36 @@
             if (!player || hasActiveError) return;
             userWantsPlayback = true;
 
-            function attemptPlay() {
-                sendDirectCommand('playVideo');
-                try {
-                    const prom = player.play();
-                    if (prom && typeof prom.catch === 'function') {
-                        prom.catch(() => {
-                            // Si el navegador bloquea el arranque con sonido, arrancar en mute temporal
-                            player.muted = true;
-                            sendDirectCommand('mute');
-                            sendDirectCommand('playVideo');
-                        });
-                    }
-                } catch (e) {
-                    sendDirectCommand('playVideo');
+            try {
+                const prom = player.play();
+                if (prom && typeof prom.catch === 'function') {
+                    prom.catch(() => {
+                        player.muted = true;
+                        sendDirectCommand('mute');
+                        try { player.play(); } catch(e) {}
+                    });
                 }
-            }
+            } catch (e) {}
 
-            attemptPlay();
+            if (isYTReady) {
+                sendDirectCommand('playVideo');
+            }
 
             if (_playRetryTimer) clearTimeout(_playRetryTimer);
             _playRetryTimer = setTimeout(() => {
                 if (!hasActiveError && !isPlayingConfirmed && userWantsPlayback) {
-                    log('safePlay retry — re-sending playVideo.');
-                    attemptPlay();
+                    log('safePlay retry — re-sending play.');
+                    safePlay();
                 }
-            }, 2000);
+            }, 2500);
         }
 
         function forceSeek(timeSec) {
             const target = Math.max(0, Number(timeSec) || 0);
             try { player.currentTime = target; } catch (e) {}
-            sendDirectCommand('seekTo', [target, true]);
+            if (isYTReady) {
+                sendDirectCommand('seekTo', [target, true]);
+            }
         }
 
         function loadVideoDirectly(vid, timeSec, autoplay) {
@@ -333,11 +332,10 @@
                 startLoadWatchdog();
             }
 
-            // INICIAR SIEMPRE MUTED para garantizar el autoplay en segundo plano
+            // Iniciar silenciado para superar las restricciones de autoplay
             player.muted = true;
-            sendDirectCommand('mute');
+            if (isYTReady) sendDirectCommand('mute');
 
-            // Asignación de fuente nativa en Vidstack
             player.src = 'youtube/' + vid;
 
             let readyFired = false;
@@ -364,7 +362,6 @@
             const onLoaded = () => { fireReady(); };
             player.addEventListener('can-play', onLoaded);
 
-            // Respaldo de seguridad en caso de que can-play tarde en emitirse
             setTimeout(() => {
                 if (!readyFired && !hasActiveError) {
                     fireReady();
@@ -381,17 +378,14 @@
 
             player.addEventListener('playing', markPlaybackStarted);
 
-            // ── ANTI-PAUSA DE PESTAÑA INACTIVA ──
             player.addEventListener('pause', () => {
-                // Si la sala está en reproducción activa y el navegador intenta pausar en segundo plano:
                 if (userWantsPlayback && !hasActiveError) {
                     setTimeout(() => {
                         if (userWantsPlayback && player.paused) {
                             try { player.play(); } catch(e) {}
-                            sendDirectCommand('playVideo');
                         }
                     }, 50);
-                    return; // ¡NO avisar a room-music.js de una pausa falsa!
+                    return;
                 }
                 postToParent({ type: 'paused' });
             });
@@ -399,7 +393,6 @@
             player.addEventListener('time-update', () => {
                 if (player.currentTime > 0) hideSpinner();
                 
-                // Si está rodando y el usuario no lo quiere silenciado, asegurar el audio
                 if (!player.paused && !desiredMuted && (player.muted || player.volume === 0)) {
                     applyAudioSettings();
                 }
@@ -440,7 +433,6 @@
             });
         }
 
-        // Si la pestaña vuelve a foco mientras cargaba, reiniciar watchdog
         document.addEventListener('visibilitychange', () => {
             if (!document.hidden && !hasActiveError && !isPlayingConfirmed && currentVid) {
                 log('Tab visible again — restarting watchdog.');
@@ -450,6 +442,9 @@
 
         window.addEventListener('message', (ev) => {
             if (typeof ev.data === 'string') {
+                if (ev.data.includes('onReady')) {
+                    isYTReady = true;
+                }
                 if (ev.data.includes('onError')) {
                     try {
                         const ytData = JSON.parse(ev.data);
@@ -493,7 +488,7 @@
                 case 'pause':
                     userWantsPlayback = false;
                     try { player.pause(); } catch (e) {}
-                    sendDirectCommand('pauseVideo');
+                    if (isYTReady) sendDirectCommand('pauseVideo');
                     hideSpinner();
                     break;
                 case 'seek':
@@ -505,26 +500,28 @@
                     if (typeof data.volume !== 'undefined') {
                         currentVolume = Math.max(0, Math.min(100, Number(data.volume)));
                         player.volume = currentVolume / 100;
-                        sendDirectCommand('setVolume', [currentVolume]);
+                        if (isYTReady) sendDirectCommand('setVolume', [currentVolume]);
                     }
                     break;
                 case 'mute':
                     desiredMuted = true;
                     player.muted = true;
-                    sendDirectCommand('mute');
+                    if (isYTReady) sendDirectCommand('mute');
                     break;
                 case 'unmute':
                     desiredMuted = false;
                     player.muted = false;
-                    sendDirectCommand('unMute');
+                    if (isYTReady) {
+                        sendDirectCommand('unMute');
+                        sendDirectCommand('setVolume', [currentVolume]);
+                    }
                     player.volume = currentVolume / 100;
-                    sendDirectCommand('setVolume', [currentVolume]);
                     break;
                 case 'stop':
                     userWantsPlayback = false;
                     clearLoadWatchdog();
                     try { player.pause(); } catch (e) {}
-                    sendDirectCommand('stopVideo');
+                    if (isYTReady) sendDirectCommand('stopVideo');
                     clearError();
                     hideSpinner();
                     videoCover.classList.remove('hidden');
