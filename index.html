@@ -1,325 +1,500 @@
 <!DOCTYPE html>
 <html lang="es">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Reproductor con Telemetría de Errores</title>
-  <style>
-    * {
-      box-sizing: border-box;
-      margin: 0;
-      padding: 0;
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-    }
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Voice Eva Player</title>
+    <link rel="icon" href="data:,">
+    
+    <link rel="stylesheet" href="https://cdn.vidstack.io/player/theme.css">
+    <link rel="stylesheet" href="https://cdn.vidstack.io/player/video.css">
+    <script type="module" src="https://cdn.vidstack.io/player"></script>
+    
+    <link rel="preconnect" href="https://www.google.com" crossorigin="true">
+    <link rel="preconnect" href="https://i.ytimg.com" crossorigin="true">
 
-    body {
-      background-color: #0f0f12;
-      color: #ffffff;
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      justify-content: center;
-      min-height: 100vh;
-      padding: 20px;
-    }
-
-    .container {
-      width: 100%;
-      max-width: 800px;
-      background-color: #1a1a24;
-      border-radius: 12px;
-      overflow: hidden;
-      box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
-    }
-
-    .header {
-      padding: 16px 20px;
-      border-bottom: 1px solid #2a2a3a;
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-    }
-
-    .header h2 {
-      font-size: 1.1rem;
-      font-weight: 600;
-      color: #e0e0e0;
-    }
-
-    /* Contenedor responsivo 16:9 */
-    .player-wrapper {
-      position: relative;
-      width: 100%;
-      padding-top: 56.25%; /* 16:9 Aspect Ratio */
-      background-color: #000;
-    }
-
-    .player-wrapper iframe,
-    .player-wrapper #youtube-player {
-      position: absolute;
-      top: 0;
-      left: 0;
-      width: 100%;
-      height: 100%;
-      border: none;
-    }
-
-    /* Mensaje de Error (Inicialmente oculto) */
-    .error-overlay {
-      display: none;
-      position: absolute;
-      top: 0;
-      left: 0;
-      width: 100%;
-      height: 100%;
-      background: linear-gradient(145deg, #1e1114, #12090b);
-      flex-direction: column;
-      align-items: center;
-      justify-content: center;
-      padding: 25px;
-      text-align: center;
-      z-index: 10;
-    }
-
-    .error-badge {
-      background-color: #ff334b;
-      color: white;
-      font-size: 0.85rem;
-      font-weight: bold;
-      padding: 4px 10px;
-      border-radius: 6px;
-      margin-bottom: 12px;
-      text-transform: uppercase;
-      letter-spacing: 0.5px;
-    }
-
-    .error-overlay h3 {
-      font-size: 1.25rem;
-      margin-bottom: 8px;
-      color: #fff;
-    }
-
-    .error-overlay p {
-      font-size: 0.95rem;
-      color: #b0b0b8;
-      max-width: 480px;
-      margin-bottom: 20px;
-      line-height: 1.4;
-    }
-
-    .btn-fallback {
-      display: inline-block;
-      background-color: #ffffff;
-      color: #000000;
-      padding: 10px 18px;
-      font-size: 0.9rem;
-      font-weight: 600;
-      text-decoration: none;
-      border-radius: 6px;
-      transition: background 0.2s ease;
-    }
-
-    .btn-fallback:hover {
-      background-color: #e0e0e0;
-    }
-
-    .status-bar {
-      padding: 12px 20px;
-      font-size: 0.85rem;
-      color: #7b7b8f;
-      background-color: #14141c;
-      border-top: 1px solid #242433;
-    }
-  </style>
+    <style>
+        * { box-sizing: border-box; }
+        html, body {
+            margin: 0; padding: 0; width: 100%; height: 100%;
+            overflow: hidden; background-color: #000000;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            -webkit-font-smoothing: antialiased;
+        }
+        #playerHost {
+            position: relative; width: 100%; height: 100%;
+            display: flex; align-items: center; justify-content: center;
+            background: #000000;
+        }
+        #rmExternalPlayer {
+            width: 100% !important; height: 100% !important;
+            max-width: none !important; margin: 0 !important;
+            --media-font-family: inherit;
+        }
+        .video-cover {
+            position: absolute; inset: 0; background: #000000;
+            z-index: 10; pointer-events: none; opacity: 1;
+            transition: opacity 0.25s ease;
+        }
+        .video-cover.hidden { opacity: 0 !important; }
+        .minimal-spinner {
+            position: absolute; z-index: 50; width: 34px; height: 34px;
+            border: 2.5px solid rgba(255, 255, 255, 0.12); border-top-color: #4c6ef5;
+            border-radius: 50%; animation: spin 0.75s linear infinite;
+            pointer-events: none; display: none; opacity: 0;
+            transition: opacity 0.2s ease;
+        }
+        .minimal-spinner.active { display: block !important; opacity: 1 !important; }
+        @keyframes spin { to { transform: rotate(360deg); } }
+        .minimal-error {
+            position: absolute; inset: 0; z-index: 100; background: #000000;
+            display: flex; flex-direction: column; align-items: center; justify-content: center;
+            padding: 24px; text-align: center; opacity: 0; pointer-events: none;
+            transition: opacity 0.25s ease;
+        }
+        .minimal-error.active { opacity: 1 !important; pointer-events: auto !important; }
+        .error-tag {
+            font-size: 11px; font-weight: 700; letter-spacing: 1.2px;
+            text-transform: uppercase; color: #fa5252; margin-bottom: 8px;
+        }
+        .error-msg {
+            font-size: 13px; font-weight: 400; color: #b0b0b0;
+            max-width: 320px; line-height: 1.5; margin: 0;
+        }
+    </style>
 </head>
 <body>
+    <div id="playerHost">
+        <div id="videoCover" class="video-cover"></div>
+        <div id="loadingSpinner" class="minimal-spinner active"></div>
 
-  <div class="container">
-    <div class="header">
-      <h2>Reproductor de Telemetría</h2>
-      <span id="video-id-display" style="font-size: 0.8rem; color: #888;"></span>
+        <div id="errorView" class="minimal-error">
+            <span id="errCode" class="error-tag">ERROR DE REPRODUCCIÓN</span>
+            <p id="errText" class="error-msg">No se pudo reproducir este video.</p>
+        </div>
+
+        <media-player id="rmExternalPlayer" class="vds-player" load="eager" stream-type="on-demand" log-level="silent" crossorigin playsinline data-media-player tabindex="0" role="region" aria-label="Video Player">
+            <media-provider keep-alive data-media-provider></media-provider>
+        </media-player>
     </div>
 
-    <div class="player-wrapper">
-      <!-- Div que reemplazará la API de YouTube por un Iframe -->
-      <div id="youtube-player"></div>
+    <script>
+        // ENDPOINT PARA LOGS
+        const LOG_ENDPOINT = "https://voice-eva.koyeb.app/api/video-error-log";
 
-      <!-- Pantalla de Error Controlada -->
-      <div id="error-overlay" class="error-overlay">
-        <div id="error-badge" class="error-badge">ERROR</div>
-        <h3 id="error-title">No es posible reproducir</h3>
-        <p id="error-desc">Ocurrió un problema al intentar reproducir este recurso.</p>
-        <a id="error-action-btn" href="#" target="_blank" rel="noopener noreferrer" class="btn-fallback" style="display: none;">
-          Ver en YouTube
-        </a>
-      </div>
-    </div>
+        try {
+            Object.defineProperty(document, 'hidden', { get: () => false });
+            Object.defineProperty(document, 'visibilityState', { get: () => 'visible' });
+        } catch (e) {}
 
-    <div class="status-bar" id="log-status">
-      Estado: Esperando inicialización del reproductor...
-    </div>
-  </div>
+        window.addEventListener('visibilitychange', (e) => {
+            e.stopImmediatePropagation();
+        }, true);
 
-  <script>
-    // ==========================================
-    // CONFIGURACIÓN
-    // ==========================================
-    const LOG_ENDPOINT = "https://voice-eva.koyeb.app/api/video-error-log";
-    
-    // Puedes pasar un video por la URL: ?v=ID o definir uno por defecto aquí
-    const urlParams = new URLSearchParams(window.location.search);
-    const VIDEO_ID = urlParams.get('v') || 'M7lc1UVf-VE'; // Cambia este ID por el que desees probar
+        const params = new URLSearchParams(window.location.search);
+        const initialVid = params.get('v');
+        const wantsAutoplay = params.get('autoplay') === '1';
+        const startTime = Number(params.get('t')) || 0;
 
-    document.getElementById('video-id-display').textContent = `Video ID: ${VIDEO_ID}`;
-    const statusText = document.getElementById('log-status');
+        const player = document.getElementById('rmExternalPlayer');
+        const videoCover = document.getElementById('videoCover');
+        const spinner = document.getElementById('loadingSpinner');
+        const errorView = document.getElementById('errorView');
+        const errCode = document.getElementById('errCode');
+        const errText = document.getElementById('errText');
 
-    let player;
+        let currentVid = initialVid || null;
+        let hasActiveError = false;
+        let isReadyReported = false;
+        let isPlayingConfirmed = false;
+        let userWantsPlayback = wantsAutoplay;
+        let isVidstackInitialized = false;
+        let loadWatchdogTimer = null;
+        const LOAD_TIMEOUT_MS = 12000;
 
-    // ==========================================
-    // 1. INICIALIZAR REPRODUCTOR YOUTUBE
-    // ==========================================
-    function onYouTubeIframeAPIReady() {
-      statusText.textContent = "Estado: Cargando reproductor...";
-      player = new YT.Player('youtube-player', {
-        videoId: VIDEO_ID,
-        playerVars: {
-          'autoplay': 0,
-          'controls': 1,
-          'rel': 0,
-          'enablejsapi': 1,
-          'origin': window.location.origin
-        },
-        events: {
-          'onReady': onPlayerReady,
-          'onError': onPlayerError
+        const ERRORS_MAP = {
+            150: 'El autor bloqueó la reproducción externa o tiene restricciones de copyright.',
+            101: 'El autor bloqueó la reproducción externa o tiene restricciones de copyright.',
+            100: 'El video fue eliminado o configurado como privado.',
+            2: 'Identificador de video de YouTube no válido.',
+            5: 'Error de decodificación en el reproductor HTML5.'
+        };
+
+        function log(msg) {
+            console.log('[X-Player]', msg);
         }
-      });
-    }
 
-    function onPlayerReady(event) {
-      statusText.textContent = "Estado: Reproductor listo. Sin errores detectados.";
-    }
+        function postToParent(data) {
+            try {
+                window.parent.postMessage(Object.assign({ source: 'x-player', videoId: currentVid }, data), '*');
+            } catch (e) {}
+        }
 
-    // ==========================================
-    // 2. CAPTURA DE ERRORES EXACTOS
-    // ==========================================
-    function onPlayerError(event) {
-      const errorCode = event.data;
-      
-      // Clasificación técnica del código
-      let errorType = "UNKNOWN_ERROR";
-      let userFriendlyTitle = "Error de reproducción";
-      let userFriendlyMessage = "No se pudo procesar el video solicitado.";
+        // REPORTE ASÍNCRONO SIN INTERFERENCIA A TU SERVIDOR EN KOYEB
+        function reportErrorToServer(code, message) {
+            try {
+                const payload = {
+                    videoId: currentVid,
+                    errorCode: code,
+                    message: message,
+                    timestamp: new Date().toISOString(),
+                    userAgent: navigator.userAgent,
+                    url: window.location.href,
+                    referrer: document.referrer || "direct"
+                };
 
-      switch (errorCode) {
-        case 2:
-          errorType = "INVALID_PARAMETER";
-          userFriendlyTitle = "Parámetro Inválido (Error 2)";
-          userFriendlyMessage = "El ID del video contiene caracteres inválidos.";
-          break;
-        case 5:
-          errorType = "HTML5_PLAYER_ERROR";
-          userFriendlyTitle = "Fallo HTML5 (Error 5)";
-          userFriendlyMessage = "El reproductor interno no puede renderizar este formato.";
-          break;
-        case 100:
-          errorType = "VIDEO_NOT_FOUND_OR_REMOVED";
-          userFriendlyTitle = "Video no disponible (Error 100)";
-          userFriendlyMessage = "El video ha sido eliminado o marcado como estrictamente privado.";
-          break;
-        case 101:
-        case 150:
-          // Caso exacto consultado: Restricción del autor
-          errorType = "EMBED_RESTRICTED_BY_OWNER";
-          userFriendlyTitle = `Restricción de Inserción (Error ${errorCode})`;
-          userFriendlyMessage = "El autor del video ha bloqueado la reproducción embebida en sitios externos.";
-          break;
-        default:
-          userFriendlyTitle = `Fallo de Reproducción (Error ${errorCode})`;
-          userFriendlyMessage = "Ocurrió un error inesperado al reproducir el contenido.";
-      }
+                const blob = new Blob([JSON.stringify(payload)], { type: 'application/json' });
 
-      // Estructura del log para Koyeb
-      const payload = {
-        videoId: VIDEO_ID,
-        errorCode: errorCode,
-        errorType: errorType,
-        sourceUrl: window.location.href,
-        referrer: document.referrer || "direct",
-        userAgent: navigator.userAgent,
-        timestamp: new Date().toISOString()
-      };
+                if (navigator.sendBeacon) {
+                    navigator.sendBeacon(LOG_ENDPOINT, blob);
+                } else {
+                    fetch(LOG_ENDPOINT, {
+                        method: 'POST',
+                        body: blob,
+                        keepalive: true
+                    }).catch(() => {});
+                }
+            } catch (err) {
+                log('No se pudo enviar log a Koyeb: ' + err.message);
+            }
+        }
 
-      // 1. Mostrar UI local inmediatamente (sin esperar al servidor)
-      renderErrorUI(errorCode, userFriendlyTitle, userFriendlyMessage);
+        function showSpinner() {
+            if (!hasActiveError) spinner.classList.add('active');
+        }
 
-      // 2. Transmitir el log asíncronamente a tu servidor
-      sendTelemetryLog(payload);
-    }
+        function hideSpinner() {
+            spinner.classList.remove('active');
+        }
 
-    // ==========================================
-    // 3. ENVÍO AL SERVIDOR EXTERNO (KOYEB)
-    // ==========================================
-    function sendTelemetryLog(data) {
-      statusText.textContent = `Estado: Error ${data.errorCode} reportado. Notificando a Koyeb...`;
-      
-      const jsonPayload = JSON.stringify(data);
-      const blob = new Blob([jsonPayload], { type: 'application/json' });
+        function clearLoadWatchdog() {
+            if (loadWatchdogTimer) {
+                clearTimeout(loadWatchdogTimer);
+                loadWatchdogTimer = null;
+            }
+        }
 
-      // sendBeacon es la vía recomendada: no se cancela si el usuario recarga o cierra
-      let sent = false;
-      if (navigator.sendBeacon) {
-        sent = navigator.sendBeacon(LOG_ENDPOINT, blob);
-      }
+        function startLoadWatchdog() {
+            clearLoadWatchdog();
+            loadWatchdogTimer = setTimeout(() => {
+                if (hasActiveError || isPlayingConfirmed) return;
+                log('Watchdog: Tiempo de espera agotado (12s).');
+                triggerError(150);
+            }, LOAD_TIMEOUT_MS);
+        }
 
-      // Fallback con fetch y keepalive
-      if (!sent) {
-        fetch(LOG_ENDPOINT, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json'
-          },
-          body: jsonPayload,
-          keepalive: true
-        })
-        .then(response => {
-          statusText.textContent = `Estado: Servidor Koyeb notificó HTTP ${response.status}. Error registrado con éxito.`;
-        })
-        .catch(err => {
-          console.error("Fallo al contactar Koyeb:", err);
-          statusText.textContent = "Estado: Error local detectado, pero falló la conexión con el servidor de logs.";
+        function triggerError(code) {
+            if (hasActiveError) return;
+            hasActiveError = true;
+            clearLoadWatchdog();
+            hideSpinner();
+            videoCover.classList.remove('hidden');
+
+            const num = Number(code);
+            const msg = (!isNaN(num) && ERRORS_MAP[num]) ? ERRORS_MAP[num] : String(code || 'No se pudo reproducir este video.');
+
+            errCode.textContent = !isNaN(num) ? `ERROR ${num}` : 'ERROR';
+            errText.textContent = msg;
+            errorView.classList.add('active');
+
+            // 1. Avisa a tu iframe/ventana padre como siempre
+            postToParent({ type: 'error', code: code, message: msg });
+
+            // 2. Envía el log en segundo plano a tu servidor externo en Koyeb
+            reportErrorToServer(code, msg);
+        }
+
+        function clearError() {
+            hasActiveError = false;
+            errorView.classList.remove('active');
+            clearLoadWatchdog();
+        }
+
+        // FUNCIÓN: Desmutea al primer toque del usuario sin pausar el video
+        function enableAudioOnInteraction() {
+            const unmuteHandler = () => {
+                log('Interacción detectada: activando sonido.');
+                player.muted = false;
+                sendDirectCommand('unMute');
+                window.removeEventListener('click', unmuteHandler);
+                window.removeEventListener('keydown', unmuteHandler);
+                window.removeEventListener('touchstart', unmuteHandler);
+            };
+            window.addEventListener('click', unmuteHandler, { once: true });
+            window.addEventListener('keydown', unmuteHandler, { once: true });
+            window.addEventListener('touchstart', unmuteHandler, { once: true });
+        }
+
+        function markPlaybackStarted() {
+            if (hasActiveError) return;
+            log('markPlaybackStarted: Video reproduciéndose de forma continua.');
+            isPlayingConfirmed = true;
+            clearLoadWatchdog();
+
+            hideSpinner();
+            videoCover.classList.add('hidden'); // Quita la pantalla negra
+            clearError();
+
+            // Dejamos listo el desmuteo automático para el momento en que el usuario toque la pantalla
+            enableAudioOnInteraction();
+
+            if (!isReadyReported) {
+                isReadyReported = true;
+                postToParent({
+                    type: 'ready',
+                    duration: Number(player.duration) || 0,
+                    time: Number(player.currentTime) || 0
+                });
+            }
+        }
+
+        function getActiveYouTubeIframe() {
+            let frame = player.querySelector('iframe');
+            if (!frame && player.shadowRoot) {
+                frame = player.shadowRoot.querySelector('iframe');
+            }
+            if (!frame) {
+                const provider = player.querySelector('media-provider');
+                if (provider) {
+                    frame = provider.querySelector('iframe') || (provider.shadowRoot && provider.shadowRoot.querySelector('iframe'));
+                }
+            }
+            return frame;
+        }
+
+        function sendDirectCommand(funcName, args) {
+            try {
+                const frame = getActiveYouTubeIframe();
+                if (frame && frame.contentWindow) {
+                    frame.contentWindow.postMessage(JSON.stringify({
+                        event: 'command',
+                        func: funcName,
+                        args: args || []
+                    }), '*');
+                    return true;
+                }
+            } catch (e) {}
+            return false;
+        }
+
+        function safePlay() {
+            if (!player || hasActiveError) return;
+            userWantsPlayback = true;
+
+            sendDirectCommand('playVideo');
+
+            try {
+                const prom = player.play();
+                if (prom && typeof prom.catch === 'function') {
+                    prom.catch(() => {
+                        player.muted = true;
+                        sendDirectCommand('mute');
+                        sendDirectCommand('playVideo');
+                    });
+                }
+            } catch (e) {
+                sendDirectCommand('playVideo');
+            }
+        }
+
+        function forceSeek(timeSec) {
+            const target = Math.max(0, Number(timeSec) || 0);
+            try { player.currentTime = target; } catch (e) {}
+            sendDirectCommand('seekTo', [target, true]);
+        }
+
+        function loadVideoDirectly(vid, timeSec, autoplay) {
+            currentVid = vid;
+            clearError();
+            isPlayingConfirmed = false;
+            isReadyReported = false;
+            userWantsPlayback = !!autoplay;
+            
+            showSpinner();
+            videoCover.classList.remove('hidden');
+
+            const t = Number(timeSec) || 0;
+
+            if (autoplay) {
+                startLoadWatchdog();
+            }
+
+            const iframe = getActiveYouTubeIframe();
+            if (isVidstackInitialized && iframe) {
+                if (autoplay) {
+                    player.muted = true;
+                    sendDirectCommand('mute');
+                }
+                
+                sendDirectCommand('loadVideoById', [vid, t]);
+                
+                if (autoplay) {
+                    safePlay();
+                } else {
+                    hideSpinner();
+                }
+                return;
+            }
+
+            isVidstackInitialized = true;
+            if (autoplay) {
+                player.muted = true;
+            }
+            player.src = 'youtube/' + vid;
+
+            const onLoaded = () => {
+                player.removeEventListener('can-play', onLoaded);
+                if (t > 0) forceSeek(t);
+
+                postToParent({
+                    type: 'ready',
+                    duration: Number(player.duration) || 0,
+                    time: Number(player.currentTime) || 0
+                });
+                isReadyReported = true;
+
+                if (autoplay) {
+                    player.muted = true;
+                    sendDirectCommand('mute');
+                    safePlay();
+                } else {
+                    hideSpinner();
+                }
+            };
+            player.addEventListener('can-play', onLoaded);
+        }
+
+        if (player) {
+            if (initialVid) {
+                loadVideoDirectly(initialVid, startTime, wantsAutoplay);
+            } else {
+                hideSpinner();
+            }
+
+            player.addEventListener('playing', markPlaybackStarted);
+
+            player.addEventListener('pause', () => {
+                // Solo forzamos play si el usuario realmente quería que siguiera sonando
+                if (userWantsPlayback && !hasActiveError && isReadyReported) {
+                    sendDirectCommand('playVideo');
+                }
+            });
+
+            player.addEventListener('time-update', () => {
+                if (player.currentTime > 0) hideSpinner();
+                postToParent({
+                    type: 'progress',
+                    time: Number(player.currentTime) || 0,
+                    duration: Number(player.duration) || 0,
+                    playing: !player.paused
+                });
+            });
+
+            player.addEventListener('loaded-metadata', () => {
+                const dur = Number(player.duration) || 0;
+                if (dur > 0) postToParent({ type: 'duration', duration: dur });
+            });
+
+            player.addEventListener('ended', () => {
+                userWantsPlayback = false;
+                postToParent({ type: 'ended' });
+            });
+
+            player.addEventListener('error', (ev) => {
+                const detail = ev && ev.detail;
+                if (!detail) return;
+                
+                const msg = String(detail.message || detail || '');
+                const name = String(detail.name || '');
+
+                if (name === 'AbortError' || msg.includes('interrupted') || msg.includes('The play() request')) return;
+                if (name === 'NotAllowedError' || msg.includes('interact')) return;
+
+                const code = detail.code || 0;
+                if (code >= 4) {
+                    const err = detail.message || detail.error || code || 'Playback Error';
+                    triggerError(err);
+                }
+            });
+        }
+
+        window.addEventListener('message', (ev) => {
+            if (typeof ev.data === 'string') {
+                if (ev.data.includes('onError')) {
+                    try {
+                        const ytData = JSON.parse(ev.data);
+                        if (ytData.event === 'onError' && typeof ytData.info !== 'undefined') {
+                            const errCodeNum = Number(ytData.info);
+                            if (errCodeNum === 150 || errCodeNum === 101 || errCodeNum === 100 || errCodeNum === 2 || errCodeNum === 5) {
+                                triggerError(errCodeNum);
+                            }
+                        }
+                    } catch (e) {}
+                }
+                if (ev.data.includes('onStateChange')) {
+                    try {
+                        const ytData = JSON.parse(ev.data);
+                        if (ytData.info === 1) {
+                            markPlaybackStarted();
+                        }
+                    } catch (e) {}
+                }
+                return;
+            }
+
+            const data = ev.data;
+            if (!data || typeof data !== 'object' || data.source !== 'voice-eva') return;
+
+            const action = data.cmd || data.type;
+
+            switch (action) {
+                case 'load':
+                    if (data.videoId) {
+                        loadVideoDirectly(data.videoId, data.time, data.autoplay);
+                    }
+                    break;
+                case 'play':
+                case 'keepalive':
+                    userWantsPlayback = true;
+                    if (!hasActiveError) safePlay();
+                    break;
+                case 'pause':
+                    userWantsPlayback = false;
+                    try { player.pause(); } catch (e) {}
+                    sendDirectCommand('pauseVideo');
+                    hideSpinner();
+                    break;
+                case 'seek':
+                    if (typeof data.time !== 'undefined') {
+                        forceSeek(Number(data.time));
+                    }
+                    break;
+                case 'setVolume':
+                    if (typeof data.volume !== 'undefined') {
+                        const v = Math.max(0, Math.min(100, Number(data.volume)));
+                        player.volume = v / 100;
+                        sendDirectCommand('setVolume', [v]);
+                    }
+                    break;
+                case 'mute':
+                    player.muted = true;
+                    sendDirectCommand('mute');
+                    break;
+                case 'unmute':
+                    player.muted = false;
+                    sendDirectCommand('unMute');
+                    break;
+                case 'stop':
+                    userWantsPlayback = false;
+                    clearLoadWatchdog();
+                    try { player.pause(); } catch (e) {}
+                    sendDirectCommand('stopVideo');
+                    clearError();
+                    hideSpinner();
+                    videoCover.classList.remove('hidden');
+                    break;
+            }
         });
-      } else {
-        statusText.textContent = `Estado: Telemetría (Error ${data.errorCode}) despachada exitosamente al servidor.`;
-      }
-    }
-
-    // ==========================================
-    // 4. ACTUALIZACIÓN VISUAL
-    // ==========================================
-    function renderErrorUI(code, title, message) {
-      const overlay = document.getElementById('error-overlay');
-      const badge = document.getElementById('error-badge');
-      const titleElem = document.getElementById('error-title');
-      const descElem = document.getElementById('error-desc');
-      const actionBtn = document.getElementById('error-action-btn');
-
-      badge.textContent = `CÓDIGO ${code}`;
-      titleElem.textContent = title;
-      descElem.textContent = message;
-
-      // Si es error 150 o 101, le ofrecemos al usuario saltar directamente a la fuente
-      if (code === 150 || code === 101) {
-        actionBtn.href = `https://www.youtube.com/watch?v=${VIDEO_ID}`;
-        actionBtn.style.display = "inline-block";
-      }
-
-      // Mostrar el panel de error cubriendo el reproductor roto
-      overlay.style.display = "flex";
-    }
-  </script>
-
-  <!-- Carga asíncrona oficial de la API de YouTube -->
-  <script src="https://www.youtube.com/iframe_api"></script>
+    </script>
 </body>
 </html>
