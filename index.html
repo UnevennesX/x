@@ -79,7 +79,6 @@
     </div>
 
     <script>
-        // Evitar que el navegador suspenda la visibilidad
         try {
             Object.defineProperty(document, 'hidden', { get: () => false });
             Object.defineProperty(document, 'visibilityState', { get: () => 'visible' });
@@ -107,6 +106,10 @@
         let userWantsPlayback = wantsAutoplay;
         let isVidstackInitialized = false;
 
+        var loadWatchdogTimer = null;
+        var isPlayingConfirmed = false;
+        var LOAD_TIMEOUT_MS = 12000;
+
         const ERRORS_MAP = {
             150: 'El autor bloqueó la reproducción externa o tiene restricciones de copyright.',
             101: 'El autor bloqueó la reproducción externa o tiene restricciones de copyright.',
@@ -129,11 +132,45 @@
             spinner.classList.remove('active');
         }
 
+        function clearLoadWatchdog() {
+            if (loadWatchdogTimer) {
+                clearTimeout(loadWatchdogTimer);
+                loadWatchdogTimer = null;
+            }
+        }
+
+        function startLoadWatchdog() {
+            clearLoadWatchdog();
+            loadWatchdogTimer = setTimeout(function() {
+                if (hasActiveError || isPlayingConfirmed) return;
+                var detectedErr = detectVidstackError();
+                triggerError(detectedErr || 150);
+            }, LOAD_TIMEOUT_MS);
+        }
+
+        function detectVidstackError() {
+            try {
+                if (player.error) {
+                    var e = player.error;
+                    return e.code || e.message || e;
+                }
+            } catch(ex) {}
+            try {
+                if (player.state && player.state.error) {
+                    var e = player.state.error;
+                    return e.code || e.message || e;
+                }
+            } catch(ex) {}
+            return null;
+        }
+
         function triggerError(code) {
             if (hasActiveError) return;
             hasActiveError = true;
+            clearLoadWatchdog();
             hideSpinner();
             videoCover.classList.remove('hidden');
+            try { player.style.visibility = 'hidden'; } catch(e) {}
 
             const num = Number(code);
             const msg = (!isNaN(num) && ERRORS_MAP[num]) ? ERRORS_MAP[num] : String(code || 'No se pudo reproducir este video.');
@@ -148,10 +185,14 @@
         function clearError() {
             hasActiveError = false;
             errorView.classList.remove('active');
+            try { player.style.visibility = ''; } catch(e) {}
+            clearLoadWatchdog();
         }
 
         function markPlaybackStarted() {
             if (hasActiveError) return;
+            isPlayingConfirmed = true;
+            clearLoadWatchdog();
             hideSpinner();
             videoCover.classList.add('hidden');
             clearError();
@@ -166,7 +207,6 @@
             }
         }
 
-        // Obtener el iframe real de YouTube dentro de Vidstack
         function getActiveYouTubeIframe() {
             let frame = player.querySelector('iframe');
             if (!frame && player.shadowRoot) {
@@ -224,14 +264,14 @@
             currentVid = vid;
             clearError();
             isReadyReported = false;
+            isPlayingConfirmed = false;
             userWantsPlayback = !!autoplay;
             showSpinner();
             videoCover.classList.remove('hidden');
+            if (autoplay) startLoadWatchdog();
 
             const t = Number(timeSec) || 0;
 
-            // Si Vidstack ya está inicializado y tiene el iframe vivo:
-            // NO TOCAMOS player.src (eso es lo que destruía el iframe en segundo plano).
             const iframe = getActiveYouTubeIframe();
             if (isVidstackInitialized && iframe) {
                 sendDirectCommand('loadVideoById', [{
@@ -247,7 +287,6 @@
                 return;
             }
 
-            // Primera carga: se inicializa Vidstack
             isVidstackInitialized = true;
             player.src = 'youtube/' + vid;
 
@@ -276,10 +315,8 @@
             }
 
             player.addEventListener('playing', markPlaybackStarted);
-            player.addEventListener('play', markPlaybackStarted);
 
             player.addEventListener('pause', () => {
-                // Si el navegador intenta pausar por estar en otra pestaña, forzamos a seguir sonando
                 if (userWantsPlayback && !hasActiveError) {
                     sendDirectCommand('playVideo');
                     setTimeout(() => {
@@ -317,6 +354,7 @@
             });
         }
 
+        // BUBBLE: comandos de Voice-Eva + YouTube state change
         window.addEventListener('message', (ev) => {
             if (typeof ev.data === 'string') {
                 if (ev.data.includes('onError')) {
@@ -328,11 +366,7 @@
                 if (ev.data.includes('onStateChange')) {
                     try {
                         const ytData = JSON.parse(ev.data);
-                        // Estado 1 = PLAYING
-                        if (ytData.info === 1) {
-                            markPlaybackStarted();
-                        }
-                        // Estado 2 = PAUSED
+                        if (ytData.info === 1) markPlaybackStarted();
                         if (ytData.info === 2 && userWantsPlayback && !hasActiveError) {
                             sendDirectCommand('playVideo');
                         }
@@ -392,6 +426,7 @@
 
                 case 'stop':
                     userWantsPlayback = false;
+                    clearLoadWatchdog();
                     try {
                         player.pause();
                     } catch (e) {}
@@ -402,6 +437,19 @@
                     break;
             }
         });
+
+        // CAPTURE PHASE: interceptar errores de YouTube ANTES de que Vidstack los consuma
+        window.addEventListener('message', function(ev) {
+            if (hasActiveError) return;
+            if (typeof ev.data !== 'string') return;
+            if (ev.data.indexOf('onError') === -1) return;
+            try {
+                var ytData = JSON.parse(ev.data);
+                if (ytData.event === 'onError' && ytData.info) {
+                    triggerError(ytData.info);
+                }
+            } catch (e) {}
+        }, true);
     </script>
 </body>
 </html>
