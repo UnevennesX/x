@@ -105,6 +105,7 @@
         let isReadyReported = false;
         let userWantsPlayback = wantsAutoplay;
         let isVidstackInitialized = false;
+        let usingDirectYT = false;
 
         var loadWatchdogTimer = null;
         var isPlayingConfirmed = false;
@@ -175,6 +176,7 @@
             if (hasActiveError) { log('triggerError BLOCKED (already active): ' + code); return; }
             log('triggerError: ' + code);
             hasActiveError = true;
+            isVidstackInitialized = false;
             clearLoadWatchdog();
             hideSpinner();
             videoCover.classList.remove('hidden');
@@ -287,6 +289,7 @@
             clearError();
             isReadyReported = false;
             isPlayingConfirmed = false;
+            usingDirectYT = false;
             userWantsPlayback = !!autoplay;
             showSpinner();
             videoCover.classList.remove('hidden');
@@ -299,21 +302,36 @@
 
             if (isVidstackInitialized && iframe) {
                 log('loadVideoDirectly: using sendDirectCommand loadVideoById');
+                usingDirectYT = true;
                 sendDirectCommand('loadVideoById', [{
                     videoId: vid,
                     startSeconds: t
                 }]);
                 
                 if (autoplay) {
-                    setTimeout(() => safePlay(), 50);
+                    sendDirectCommand('playVideo');
+                    setTimeout(function() {
+                        if (!isPlayingConfirmed && !hasActiveError) {
+                            log('loadVideoDirectly: retry playVideo #1');
+                            sendDirectCommand('playVideo');
+                        }
+                    }, 500);
+                    setTimeout(function() {
+                        if (!isPlayingConfirmed && !hasActiveError) {
+                            log('loadVideoDirectly: retry playVideo #2');
+                            sendDirectCommand('playVideo');
+                        }
+                    }, 1500);
                 } else {
                     hideSpinner();
                 }
                 return;
             }
 
-            log('loadVideoDirectly: setting player.src');
+            log('loadVideoDirectly: setting player.src (fresh)');
             isVidstackInitialized = true;
+            isPlayingConfirmed = false;
+            usingDirectYT = false;
             player.src = 'youtube/' + vid;
 
             const onLoaded = () => {
@@ -346,11 +364,12 @@
             player.addEventListener('playing', () => { log('EVENT: playing'); markPlaybackStarted(); });
 
             player.addEventListener('pause', () => {
-                log('EVENT: pause userWants=' + userWantsPlayback + ' err=' + hasActiveError);
+                log('EVENT: pause userWants=' + userWantsPlayback + ' err=' + hasActiveError + ' directYT=' + usingDirectYT);
+                if (usingDirectYT) return;
                 if (userWantsPlayback && !hasActiveError) {
                     sendDirectCommand('playVideo');
                     setTimeout(() => {
-                        if (userWantsPlayback && player.paused) {
+                        if (userWantsPlayback && player.paused && !usingDirectYT) {
                             safePlay();
                         }
                     }, 80);
@@ -359,11 +378,12 @@
 
             player.addEventListener('time-update', () => {
                 if (player.currentTime > 0) hideSpinner();
+                var isPlaying = usingDirectYT ? !hasActiveError && userWantsPlayback : !player.paused;
                 postToParent({
                     type: 'progress',
                     time: Number(player.currentTime) || 0,
                     duration: Number(player.duration) || 0,
-                    playing: !player.paused
+                    playing: isPlaying
                 });
             });
 
@@ -429,7 +449,13 @@
                 case 'play':
                 case 'keepalive':
                     userWantsPlayback = true;
-                    if (!hasActiveError) safePlay();
+                    if (!hasActiveError) {
+                        if (usingDirectYT) {
+                            sendDirectCommand('playVideo');
+                        } else {
+                            safePlay();
+                        }
+                    }
                     break;
 
                 case 'pause':
@@ -465,6 +491,9 @@
 
                 case 'stop':
                     userWantsPlayback = false;
+                    isPlayingConfirmed = false;
+                    isVidstackInitialized = false;
+                    usingDirectYT = false;
                     clearLoadWatchdog();
                     try {
                         player.pause();
