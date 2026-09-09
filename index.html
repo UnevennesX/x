@@ -320,7 +320,7 @@
             mp.addEventListener('time-update', function() {
                 if (player && player.currentTime > 0) hideSpinner();
                 var dur = Number(player ? player.duration : 0) || 0;
-                var isPlaying = !hasActiveError && userWantsPlayback;
+                var isPlaying = player ? !player.paused : false;
                 postToParent({
                     type: 'progress',
                     time: Number(player ? player.currentTime : 0) || 0,
