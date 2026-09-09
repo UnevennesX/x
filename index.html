@@ -79,7 +79,6 @@
     </div>
 
     <script>
-        // ENDPOINT PARA LOGS
         const LOG_ENDPOINT = "https://voice-eva.koyeb.app/api/video-error-log";
 
         try {
@@ -95,6 +94,10 @@
         const initialVid = params.get('v');
         const wantsAutoplay = params.get('autoplay') === '1';
         const startTime = Number(params.get('t')) || 0;
+        
+        // Estado deseado por el usuario (volumen y mute)
+        let currentVolume = params.has('vol') ? Math.max(0, Math.min(100, Number(params.get('vol')))) : 100;
+        let desiredMuted = params.get('muted') === '1';
 
         const player = document.getElementById('rmExternalPlayer');
         const videoCover = document.getElementById('videoCover');
@@ -141,17 +144,11 @@
                     url: window.location.href,
                     referrer: document.referrer || "direct"
                 };
-
                 const blob = new Blob([JSON.stringify(payload)], { type: 'application/json' });
-
                 if (navigator.sendBeacon) {
                     navigator.sendBeacon(LOG_ENDPOINT, blob);
                 } else {
-                    fetch(LOG_ENDPOINT, {
-                        method: 'POST',
-                        body: blob,
-                        keepalive: true
-                    }).catch(() => {});
+                    fetch(LOG_ENDPOINT, { method: 'POST', body: blob, keepalive: true }).catch(() => {});
                 }
             } catch (err) {
                 log('No se pudo enviar log a Koyeb: ' + err.message);
@@ -177,7 +174,7 @@
             clearLoadWatchdog();
             loadWatchdogTimer = setTimeout(() => {
                 if (hasActiveError || isPlayingConfirmed) return;
-                log('Watchdog: Aún sin confirmar reproducción — reintentando (sin error).');
+                log('Watchdog: Aún sin confirmar reproducción — reintentando.');
                 if (userWantsPlayback) safePlay();
             }, LOAD_TIMEOUT_MS);
         }
@@ -206,23 +203,22 @@
             clearLoadWatchdog();
         }
 
-        function enableAudioOnInteraction() {
-            const unmuteHandler = () => {
-                log('Interacción detectada: activando sonido.');
+        // Aplicar volumen y desmuteo real
+        function applyAudioSettings() {
+            if (desiredMuted) {
+                player.muted = true;
+                sendDirectCommand('mute');
+            } else {
                 player.muted = false;
                 sendDirectCommand('unMute');
-                window.removeEventListener('click', unmuteHandler);
-                window.removeEventListener('keydown', unmuteHandler);
-                window.removeEventListener('touchstart', unmuteHandler);
-            };
-            window.addEventListener('click', unmuteHandler, { once: true });
-            window.addEventListener('keydown', unmuteHandler, { once: true });
-            window.addEventListener('touchstart', unmuteHandler, { once: true });
+            }
+            player.volume = currentVolume / 100;
+            sendDirectCommand('setVolume', [currentVolume]);
         }
 
         function markPlaybackStarted() {
             if (hasActiveError) return;
-            log('markPlaybackStarted: Video reproduciéndose de forma continua.');
+            log('markPlaybackStarted: Video reproduciéndose.');
             isPlayingConfirmed = true;
             clearLoadWatchdog();
 
@@ -230,7 +226,9 @@
             videoCover.classList.add('hidden');
             clearError();
 
-            enableAudioOnInteraction();
+            // DESMUTEO AUTOMÁTICO INMEDIATO:
+            // Si el usuario no tiene mute activado, restaurar volumen y desmutear ya mismo
+            applyAudioSettings();
 
             if (!isReadyReported) {
                 isReadyReported = true;
@@ -300,6 +298,7 @@
                     const prom = player.play();
                     if (prom && typeof prom.catch === 'function') {
                         prom.catch(() => {
+                            // Si el navegador bloquea el arranque con sonido, arrancar en mute temporal
                             player.muted = true;
                             sendDirectCommand('mute');
                             sendDirectCommand('playVideo');
@@ -344,13 +343,9 @@
                 startLoadWatchdog();
             }
 
+            // Reutilización directa si el reproductor ya está instanciado
             const iframe = getActiveYouTubeIframe();
             if (isVidstackInitialized && iframe) {
-                if (autoplay) {
-                    player.muted = true;
-                    sendDirectCommand('mute');
-                }
-                
                 sendDirectCommand('loadVideoById', [vid, t]);
                 
                 postToParent({
@@ -369,9 +364,6 @@
             }
 
             isVidstackInitialized = true;
-            if (autoplay) {
-                player.muted = true;
-            }
             player.src = 'youtube/' + vid;
 
             let readyFired = false;
@@ -389,20 +381,15 @@
                 isReadyReported = true;
 
                 if (autoplay) {
-                    player.muted = true;
-                    sendDirectCommand('mute');
-                    setTimeout(() => safePlay(), 300);
+                    setTimeout(() => safePlay(), 200);
                 } else {
                     hideSpinner();
                 }
             };
 
-            const onLoaded = () => {
-                fireReady();
-            };
+            const onLoaded = () => { fireReady(); };
             player.addEventListener('can-play', onLoaded);
 
-            // Respaldo de seguridad en caso de que can-play tarde en emitirse con la ventana minimizada
             setTimeout(() => {
                 if (!readyFired && !hasActiveError) {
                     fireReady();
@@ -428,6 +415,12 @@
 
             player.addEventListener('time-update', () => {
                 if (player.currentTime > 0) hideSpinner();
+                
+                // Si ya está reproduciendo y no está silenciado intencionalmente, asegurar audio
+                if (!player.paused && !desiredMuted && (player.muted || player.volume === 0)) {
+                    applyAudioSettings();
+                }
+
                 postToParent({
                     type: 'progress',
                     time: Number(player.currentTime) || 0,
@@ -503,6 +496,8 @@
             switch (action) {
                 case 'load':
                     if (data.videoId) {
+                        if (typeof data.volume !== 'undefined') currentVolume = Number(data.volume);
+                        if (typeof data.muted !== 'undefined') desiredMuted = !!data.muted;
                         loadVideoDirectly(data.videoId, data.time, data.autoplay);
                     }
                     break;
@@ -524,18 +519,22 @@
                     break;
                 case 'setVolume':
                     if (typeof data.volume !== 'undefined') {
-                        const v = Math.max(0, Math.min(100, Number(data.volume)));
-                        player.volume = v / 100;
-                        sendDirectCommand('setVolume', [v]);
+                        currentVolume = Math.max(0, Math.min(100, Number(data.volume)));
+                        player.volume = currentVolume / 100;
+                        sendDirectCommand('setVolume', [currentVolume]);
                     }
                     break;
                 case 'mute':
+                    desiredMuted = true;
                     player.muted = true;
                     sendDirectCommand('mute');
                     break;
                 case 'unmute':
+                    desiredMuted = false;
                     player.muted = false;
                     sendDirectCommand('unMute');
+                    player.volume = currentVolume / 100;
+                    sendDirectCommand('setVolume', [currentVolume]);
                     break;
                 case 'stop':
                     userWantsPlayback = false;
