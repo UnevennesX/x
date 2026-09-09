@@ -46,19 +46,6 @@
         }
         .minimal-spinner.active { display: block !important; opacity: 1 !important; }
         @keyframes spin { to { transform: rotate(360deg); } }
-
-        /* Botón flotante para activar el sonido */
-        .unmute-badge {
-            position: absolute; top: 16px; right: 16px; z-index: 40;
-            background: rgba(0, 0, 0, 0.75); border: 1px solid rgba(255, 255, 255, 0.2);
-            color: #ffffff; padding: 8px 14px; border-radius: 20px;
-            font-size: 12px; font-weight: 500; cursor: pointer;
-            display: none; align-items: center; gap: 6px;
-            backdrop-filter: blur(4px); transition: opacity 0.2s, transform 0.2s;
-        }
-        .unmute-badge.active { display: flex !important; }
-        .unmute-badge:hover { background: rgba(76, 110, 245, 0.9); transform: scale(1.03); }
-
         .minimal-error {
             position: absolute; inset: 0; z-index: 100; background: #000000;
             display: flex; flex-direction: column; align-items: center; justify-content: center;
@@ -80,11 +67,6 @@
     <div id="playerHost">
         <div id="videoCover" class="video-cover"></div>
         <div id="loadingSpinner" class="minimal-spinner active"></div>
-
-        <!-- Botón para desmutear con un clic -->
-        <div id="unmuteBadge" class="unmute-badge">
-            <span>🔇 Activar sonido</span>
-        </div>
 
         <div id="errorView" class="minimal-error">
             <span id="errCode" class="error-tag">ERROR DE REPRODUCCIÓN</span>
@@ -114,7 +96,6 @@
         const player = document.getElementById('rmExternalPlayer');
         const videoCover = document.getElementById('videoCover');
         const spinner = document.getElementById('loadingSpinner');
-        const unmuteBadge = document.getElementById('unmuteBadge');
         const errorView = document.getElementById('errorView');
         const errCode = document.getElementById('errCode');
         const errText = document.getElementById('errText');
@@ -175,7 +156,6 @@
             hasActiveError = true;
             clearLoadWatchdog();
             hideSpinner();
-            unmuteBadge.classList.remove('active');
             videoCover.classList.remove('hidden');
 
             const num = Number(code);
@@ -194,28 +174,24 @@
             clearLoadWatchdog();
         }
 
-        // Activa el sonido y oculta el badge
-        function doUnmute() {
-            player.muted = false;
-            sendDirectCommand('unMute');
-            unmuteBadge.classList.remove('active');
+        // FUNCIÓN: Desmutea al primer toque del usuario sin pausar el video
+        function enableAudioOnInteraction() {
+            const unmuteHandler = () => {
+                log('Interacción detectada: activando sonido.');
+                player.muted = false;
+                sendDirectCommand('unMute');
+                window.removeEventListener('click', unmuteHandler);
+                window.removeEventListener('keydown', unmuteHandler);
+                window.removeEventListener('touchstart', unmuteHandler);
+            };
+            window.addEventListener('click', unmuteHandler, { once: true });
+            window.addEventListener('keydown', unmuteHandler, { once: true });
+            window.addEventListener('touchstart', unmuteHandler, { once: true });
         }
-
-        unmuteBadge.addEventListener('click', (e) => {
-            e.stopPropagation();
-            doUnmute();
-        });
-
-        // Al hacer clic en cualquier parte de la pantalla, también se activa el sonido
-        window.addEventListener('click', () => {
-            if (player && player.muted) {
-                doUnmute();
-            }
-        });
 
         function markPlaybackStarted() {
             if (hasActiveError) return;
-            log('markPlaybackStarted: Video reproduciéndose.');
+            log('markPlaybackStarted: Video reproduciéndose de forma continua.');
             isPlayingConfirmed = true;
             clearLoadWatchdog();
 
@@ -223,10 +199,8 @@
             videoCover.classList.add('hidden'); // Quita la pantalla negra
             clearError();
 
-            // Mostramos el aviso de activar sonido si el video arrancó silenciado
-            if (player.muted) {
-                unmuteBadge.classList.add('active');
-            }
+            // Dejamos listo el desmuteo automático para el momento en que el usuario toque la pantalla
+            enableAudioOnInteraction();
 
             if (!isReadyReported) {
                 isReadyReported = true;
@@ -270,12 +244,15 @@
         function safePlay() {
             if (!player || hasActiveError) return;
             userWantsPlayback = true;
+
             sendDirectCommand('playVideo');
 
             try {
                 const prom = player.play();
                 if (prom && typeof prom.catch === 'function') {
                     prom.catch(() => {
+                        player.muted = true;
+                        sendDirectCommand('mute');
                         sendDirectCommand('playVideo');
                     });
                 }
@@ -308,7 +285,6 @@
 
             const iframe = getActiveYouTubeIframe();
             if (isVidstackInitialized && iframe) {
-                // Autoplay con mute inicial garantizado
                 if (autoplay) {
                     player.muted = true;
                     sendDirectCommand('mute');
@@ -362,6 +338,7 @@
             player.addEventListener('playing', markPlaybackStarted);
 
             player.addEventListener('pause', () => {
+                // Solo forzamos play si el usuario realmente quería que siguiera sonando
                 if (userWantsPlayback && !hasActiveError && isReadyReported) {
                     sendDirectCommand('playVideo');
                 }
@@ -468,12 +445,12 @@
                     sendDirectCommand('mute');
                     break;
                 case 'unmute':
-                    doUnmute();
+                    player.muted = false;
+                    sendDirectCommand('unMute');
                     break;
                 case 'stop':
                     userWantsPlayback = false;
                     clearLoadWatchdog();
-                    unmuteBadge.classList.remove('active');
                     try { player.pause(); } catch (e) {}
                     sendDirectCommand('stopVideo');
                     clearError();
