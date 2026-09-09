@@ -79,11 +79,19 @@
     </div>
 
     <script>
-        // Evitar que el navegador suspenda la visibilidad
+        const LOG_ENDPOINT = "https://voice-eva.koyeb.app/api/video-error-log";
+
+        // Impedir que los scripts internos pausen por cambio de visibilidad
         try {
             Object.defineProperty(document, 'hidden', { get: () => false });
             Object.defineProperty(document, 'visibilityState', { get: () => 'visible' });
+            Object.defineProperty(Document.prototype, 'hidden', { get: () => false });
+            Object.defineProperty(Document.prototype, 'visibilityState', { get: () => 'visible' });
         } catch (e) {}
+
+        document.addEventListener('visibilitychange', (e) => {
+            e.stopImmediatePropagation();
+        }, true);
 
         window.addEventListener('visibilitychange', (e) => {
             e.stopImmediatePropagation();
@@ -93,6 +101,11 @@
         const initialVid = params.get('v');
         const wantsAutoplay = params.get('autoplay') === '1';
         const startTime = Number(params.get('t')) || 0;
+        
+        // Si vol no viene o es 0 por error de sincronización previa, usar 100 por defecto
+        let rawVol = params.get('vol');
+        let currentVolume = (rawVol !== null && rawVol !== '' && Number(rawVol) > 0) ? Math.max(0, Math.min(100, Number(rawVol))) : 100;
+        let desiredMuted = params.get('muted') === '1' && currentVolume === 0;
 
         const player = document.getElementById('rmExternalPlayer');
         const videoCover = document.getElementById('videoCover');
@@ -104,21 +117,49 @@
         let currentVid = initialVid || null;
         let hasActiveError = false;
         let isReadyReported = false;
+        let isPlayingConfirmed = false;
+        let isMediaReady = false;
         let userWantsPlayback = wantsAutoplay;
-        let isVidstackInitialized = false;
+        let loadWatchdogTimer = null;
+        let _playRetryTimer = null;
+        const LOAD_TIMEOUT_MS = 12000;
 
-        const ERRORS_MAP = {
-            150: 'El autor bloqueó la reproducción externa o tiene restricciones de copyright.',
-            101: 'El autor bloqueó la reproducción externa o tiene restricciones de copyright.',
-            100: 'El video fue eliminado o configurado como privado.',
-            2: 'Identificador de video de YouTube no válido.',
-            5: 'Error de decodificación en el reproductor HTML5.'
+        const YT_ERRORS = {
+            2:   { scope: 'content', msg: 'Identificador de video de YouTube no válido.' },
+            5:   { scope: 'local',   msg: 'Error de decodificación en el reproductor HTML5.' },
+            100: { scope: 'content', msg: 'El video fue eliminado o configurado como privado.' },
+            101: { scope: 'embed',   msg: 'El autor bloqueó la reproducción externa o el video está restringido en tu región.' },
+            150: { scope: 'embed',   msg: 'El autor bloqueó la reproducción externa o el video está restringido en tu región.' }
         };
+
+        function log(msg) {
+            console.log('[X-Player]', msg);
+        }
 
         function postToParent(data) {
             try {
                 window.parent.postMessage(Object.assign({ source: 'x-player', videoId: currentVid }, data), '*');
             } catch (e) {}
+        }
+
+        function reportErrorToServer(code, message) {
+            try {
+                const payload = {
+                    videoId: currentVid,
+                    errorCode: code,
+                    message: message,
+                    timestamp: new Date().toISOString(),
+                    userAgent: navigator.userAgent,
+                    url: window.location.href,
+                    referrer: document.referrer || "direct"
+                };
+                const blob = new Blob([JSON.stringify(payload)], { type: 'application/json' });
+                if (navigator.sendBeacon) {
+                    navigator.sendBeacon(LOG_ENDPOINT, blob);
+                } else {
+                    fetch(LOG_ENDPOINT, { method: 'POST', body: blob, keepalive: true }).catch(() => {});
+                }
+            } catch (err) {}
         }
 
         function showSpinner() {
@@ -129,44 +170,46 @@
             spinner.classList.remove('active');
         }
 
+        function clearLoadWatchdog() {
+            if (loadWatchdogTimer) {
+                clearTimeout(loadWatchdogTimer);
+                loadWatchdogTimer = null;
+            }
+        }
+
+        function startLoadWatchdog() {
+            clearLoadWatchdog();
+            loadWatchdogTimer = setTimeout(() => {
+                if (hasActiveError || isPlayingConfirmed) return;
+                log('Watchdog: Reintentando arranque en background...');
+                if (userWantsPlayback) safePlay();
+            }, LOAD_TIMEOUT_MS);
+        }
+
         function triggerError(code) {
             if (hasActiveError) return;
             hasActiveError = true;
+            clearLoadWatchdog();
             hideSpinner();
             videoCover.classList.remove('hidden');
 
             const num = Number(code);
-            const msg = (!isNaN(num) && ERRORS_MAP[num]) ? ERRORS_MAP[num] : String(code || 'No se pudo reproducir este video.');
+            const msg = (!isNaN(num) && YT_ERRORS[num]) ? YT_ERRORS[num].msg : String(code || 'No se pudo reproducir este video.');
 
             errCode.textContent = !isNaN(num) ? `ERROR ${num}` : 'ERROR';
             errText.textContent = msg;
             errorView.classList.add('active');
 
             postToParent({ type: 'error', code: code, message: msg });
+            reportErrorToServer(code, msg);
         }
 
         function clearError() {
             hasActiveError = false;
             errorView.classList.remove('active');
+            clearLoadWatchdog();
         }
 
-        function markPlaybackStarted() {
-            if (hasActiveError) return;
-            hideSpinner();
-            videoCover.classList.add('hidden');
-            clearError();
-
-            if (!isReadyReported) {
-                isReadyReported = true;
-                postToParent({
-                    type: 'ready',
-                    duration: Number(player.duration) || 0,
-                    time: Number(player.currentTime) || 0
-                });
-            }
-        }
-
-        // Obtener el iframe real de YouTube dentro de Vidstack
         function getActiveYouTubeIframe() {
             let frame = player.querySelector('iframe');
             if (!frame && player.shadowRoot) {
@@ -177,6 +220,9 @@
                 if (provider) {
                     frame = provider.querySelector('iframe') || (provider.shadowRoot && provider.shadowRoot.querySelector('iframe'));
                 }
+            }
+            if (!frame) {
+                frame = document.querySelector('iframe[src*="youtube"]');
             }
             return frame;
         }
@@ -197,8 +243,15 @@
         }
 
         function safePlay() {
-            if (!player || hasActiveError) return;
+            if (!player || hasActiveError || !isMediaReady) return;
             userWantsPlayback = true;
+
+            // Para superar la restricción de inicio en segundo plano:
+            // arrancamos silenciado en YouTube y desmuteamos en el evento "playing"
+            if (!isPlayingConfirmed) {
+                player.muted = true;
+                sendDirectCommand('mute');
+            }
 
             sendDirectCommand('playVideo');
 
@@ -206,12 +259,19 @@
                 const prom = player.play();
                 if (prom && typeof prom.catch === 'function') {
                     prom.catch(() => {
+                        player.muted = true;
+                        sendDirectCommand('mute');
                         sendDirectCommand('playVideo');
                     });
                 }
-            } catch (e) {
-                sendDirectCommand('playVideo');
-            }
+            } catch (e) {}
+
+            if (_playRetryTimer) clearTimeout(_playRetryTimer);
+            _playRetryTimer = setTimeout(() => {
+                if (!hasActiveError && !isPlayingConfirmed && userWantsPlayback && isMediaReady) {
+                    safePlay();
+                }
+            }, 1800);
         }
 
         function forceSeek(timeSec) {
@@ -220,52 +280,99 @@
             sendDirectCommand('seekTo', [target, true]);
         }
 
-        function loadVideoDirectly(vid, timeSec, autoplay) {
-            currentVid = vid;
+        function markPlaybackStarted() {
+            if (hasActiveError) return;
+            log('markPlaybackStarted: Reproducción activa confirmada.');
+            isPlayingConfirmed = true;
+            isMediaReady = true;
+            clearLoadWatchdog();
+
+            if (_playRetryTimer) {
+                clearTimeout(_playRetryTimer);
+                _playRetryTimer = null;
+            }
+
+            hideSpinner();
+            videoCover.classList.add('hidden');
             clearError();
+
+            // Desmuteo inmediato y seguro: el navegador no lo bloquea porque el streaming ya comenzó
+            setTimeout(() => {
+                player.muted = false;
+                sendDirectCommand('unMute');
+                sendDirectCommand('setVolume', [currentVolume]);
+                player.volume = currentVolume / 100;
+            }, 150);
+
+            if (!isReadyReported) {
+                isReadyReported = true;
+                postToParent({
+                    type: 'ready',
+                    duration: Number(player.duration) || 0,
+                    time: Number(player.currentTime) || 0
+                });
+            }
+        }
+
+        function loadVideoDirectly(vid, timeSec, autoplay) {
+            if (currentVid === vid && isPlayingConfirmed && !hasActiveError) {
+                if (autoplay) safePlay();
+                return;
+            }
+
+            currentVid = vid;
+            isMediaReady = false;
+            clearError();
+            hasActiveError = false;
+            isPlayingConfirmed = false;
             isReadyReported = false;
             userWantsPlayback = !!autoplay;
+            
             showSpinner();
             videoCover.classList.remove('hidden');
 
             const t = Number(timeSec) || 0;
 
-            // Si Vidstack ya está inicializado y tiene el iframe vivo:
-            // NO TOCAMOS player.src (eso es lo que destruía el iframe en segundo plano).
-            const iframe = getActiveYouTubeIframe();
-            if (isVidstackInitialized && iframe) {
-                sendDirectCommand('loadVideoById', [{
-                    videoId: vid,
-                    startSeconds: t
-                }]);
-                
-                if (autoplay) {
-                    setTimeout(() => safePlay(), 50);
-                } else {
-                    hideSpinner();
-                }
-                return;
+            if (autoplay) {
+                startLoadWatchdog();
             }
 
-            // Primera carga: se inicializa Vidstack
-            isVidstackInitialized = true;
+            // Inicio silenciado para que Chromium jamás rechace el inicio en pestaña inactiva
+            player.muted = true;
+            sendDirectCommand('mute');
+
             player.src = 'youtube/' + vid;
 
-            const onLoaded = () => {
+            let readyFired = false;
+            const fireReady = () => {
+                if (readyFired) return;
+                readyFired = true;
+                isMediaReady = true;
                 player.removeEventListener('can-play', onLoaded);
                 if (t > 0) forceSeek(t);
 
                 postToParent({
                     type: 'ready',
                     duration: Number(player.duration) || 0,
-                    time: Number(player.currentTime) || 0
+                    time: Number(player.currentTime) || t || 0
                 });
                 isReadyReported = true;
 
-                if (autoplay) safePlay();
-                else hideSpinner();
+                if (autoplay) {
+                    safePlay();
+                } else {
+                    hideSpinner();
+                }
             };
-            player.addEventListener('can-play', onLoaded);
+
+            const onLoaded = () => { fireReady(); };
+            player.addEventListener('can-play', onLoaded, { once: true });
+
+            setTimeout(() => {
+                if (!readyFired && !hasActiveError) {
+                    fireReady();
+                }
+            }, 1200);
         }
 
         if (player) {
@@ -276,22 +383,24 @@
             }
 
             player.addEventListener('playing', markPlaybackStarted);
-            player.addEventListener('play', markPlaybackStarted);
 
             player.addEventListener('pause', () => {
-                // Si el navegador intenta pausar por estar en otra pestaña, forzamos a seguir sonando
-                if (userWantsPlayback && !hasActiveError) {
-                    sendDirectCommand('playVideo');
+                if (userWantsPlayback && !hasActiveError && isMediaReady) {
                     setTimeout(() => {
-                        if (userWantsPlayback && player.paused) {
-                            safePlay();
+                        if (userWantsPlayback && player.paused && isMediaReady) {
+                            const p = player.play();
+                            if (p && p.catch) p.catch(() => {});
+                            sendDirectCommand('playVideo');
                         }
-                    }, 80);
+                    }, 100);
+                    return;
                 }
+                postToParent({ type: 'paused' });
             });
 
             player.addEventListener('time-update', () => {
                 if (player.currentTime > 0) hideSpinner();
+
                 postToParent({
                     type: 'progress',
                     time: Number(player.currentTime) || 0,
@@ -312,29 +421,52 @@
 
             player.addEventListener('error', (ev) => {
                 const detail = ev && ev.detail;
-                const err = (detail && (detail.code || detail.message || detail.error)) || 'Playback Error';
-                triggerError(err);
+                if (!detail) return;
+                
+                const msg = String(detail.message || detail || '');
+                const name = String(detail.name || '');
+
+                if (name === 'AbortError' || msg.includes('interrupted') || msg.includes('play()')) return;
+                if (name === 'NotAllowedError' || msg.includes('interact') || msg.includes('not ready')) return;
+
+                const code = detail.code || 0;
+                if (code >= 4) {
+                    const err = detail.message || detail.error || code || 'Playback Error';
+                    triggerError(err);
+                }
             });
         }
 
+        document.addEventListener('visibilitychange', () => {
+            if (!document.hidden && !hasActiveError && !isPlayingConfirmed && currentVid) {
+                startLoadWatchdog();
+                if (userWantsPlayback && isMediaReady) safePlay();
+            }
+        });
+
         window.addEventListener('message', (ev) => {
             if (typeof ev.data === 'string') {
+                if (ev.data.includes('onReady')) {
+                    if (userWantsPlayback && !isPlayingConfirmed && isMediaReady) {
+                        safePlay();
+                    }
+                }
                 if (ev.data.includes('onError')) {
                     try {
                         const ytData = JSON.parse(ev.data);
-                        if (ytData.event === 'onError' && ytData.info) triggerError(ytData.info);
+                        if (ytData.event === 'onError' && typeof ytData.info !== 'undefined') {
+                            const errCodeNum = Number(ytData.info);
+                            if (errCodeNum === 150 || errCodeNum === 101 || errCodeNum === 100 || errCodeNum === 2 || errCodeNum === 5) {
+                                triggerError(errCodeNum);
+                            }
+                        }
                     } catch (e) {}
                 }
                 if (ev.data.includes('onStateChange')) {
                     try {
                         const ytData = JSON.parse(ev.data);
-                        // Estado 1 = PLAYING
                         if (ytData.info === 1) {
                             markPlaybackStarted();
-                        }
-                        // Estado 2 = PAUSED
-                        if (ytData.info === 2 && userWantsPlayback && !hasActiveError) {
-                            sendDirectCommand('playVideo');
                         }
                     } catch (e) {}
                 }
@@ -349,52 +481,50 @@
             switch (action) {
                 case 'load':
                     if (data.videoId) {
+                        if (typeof data.volume !== 'undefined') currentVolume = Math.max(0, Math.min(100, Number(data.volume)));
+                        if (typeof data.muted !== 'undefined') desiredMuted = !!data.muted;
                         loadVideoDirectly(data.videoId, data.time, data.autoplay);
                     }
                     break;
-
                 case 'play':
                 case 'keepalive':
                     userWantsPlayback = true;
-                    if (!hasActiveError) safePlay();
+                    if (!hasActiveError && isMediaReady) safePlay();
                     break;
-
                 case 'pause':
                     userWantsPlayback = false;
                     try { player.pause(); } catch (e) {}
                     sendDirectCommand('pauseVideo');
                     hideSpinner();
                     break;
-
                 case 'seek':
                     if (typeof data.time !== 'undefined') {
                         forceSeek(Number(data.time));
                     }
                     break;
-
                 case 'setVolume':
                     if (typeof data.volume !== 'undefined') {
-                        const v = Math.max(0, Math.min(100, Number(data.volume)));
-                        player.volume = v / 100;
-                        sendDirectCommand('setVolume', [v]);
+                        currentVolume = Math.max(0, Math.min(100, Number(data.volume)));
+                        player.volume = currentVolume / 100;
+                        sendDirectCommand('setVolume', [currentVolume]);
                     }
                     break;
-
                 case 'mute':
+                    desiredMuted = true;
                     player.muted = true;
                     sendDirectCommand('mute');
                     break;
-
                 case 'unmute':
+                    desiredMuted = false;
                     player.muted = false;
                     sendDirectCommand('unMute');
+                    sendDirectCommand('setVolume', [currentVolume]);
+                    player.volume = currentVolume / 100;
                     break;
-
                 case 'stop':
                     userWantsPlayback = false;
-                    try {
-                        player.pause();
-                    } catch (e) {}
+                    clearLoadWatchdog();
+                    try { player.pause(); } catch (e) {}
                     sendDirectCommand('stopVideo');
                     clearError();
                     hideSpinner();
