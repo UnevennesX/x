@@ -93,6 +93,7 @@
 
         let player = null;
         let currentVid = initialVid || null;
+        let playerVid = null;
         let hasActiveError = false;
         let isReadyReported = false;
         let userWantsPlayback = wantsAutoplay;
@@ -268,6 +269,7 @@
 
         function destroyPlayer() {
             if (ytStateChangeRetry) { clearTimeout(ytStateChangeRetry); ytStateChangeRetry = null; }
+            playerVid = null;
             if (player) {
                 try { player.pause(); } catch(e) {}
                 try { player.removeAttribute('src'); } catch(e) {}
@@ -279,6 +281,7 @@
 
         function createPlayer(vid, timeSec, autoplay) {
             destroyPlayer();
+            playerVid = vid;
 
             var mp = document.createElement('media-player');
             mp.id = 'rmExternalPlayer';
@@ -301,11 +304,13 @@
             player = mp;
 
             mp.addEventListener('playing', function() {
+                if (playerVid !== currentVid) return;
                 log('EVENT: playing');
                 markPlaybackStarted();
             });
 
             mp.addEventListener('pause', function() {
+                if (playerVid !== currentVid) return;
                 log('EVENT: pause userWants=' + userWantsPlayback + ' err=' + hasActiveError);
                 if (userWantsPlayback && !hasActiveError) {
                     sendDirectCommand('playVideo');
@@ -318,6 +323,7 @@
             });
 
             mp.addEventListener('time-update', function() {
+                if (playerVid !== currentVid) return;
                 if (player && player.currentTime > 0) hideSpinner();
                 var dur = Number(player ? player.duration : 0) || 0;
                 var isPlaying = player ? !player.paused : false;
@@ -330,17 +336,20 @@
             });
 
             mp.addEventListener('loaded-metadata', function() {
+                if (playerVid !== currentVid) return;
                 var dur = Number(player ? player.duration : 0) || 0;
                 if (dur > 0) postToParent({ type: 'duration', duration: dur });
             });
 
             mp.addEventListener('ended', function() {
+                if (playerVid !== currentVid) return;
                 log('EVENT: ended');
                 userWantsPlayback = false;
                 postToParent({ type: 'ended' });
             });
 
             mp.addEventListener('error', function(ev) {
+                if (playerVid !== currentVid) return;
                 var detail = ev && ev.detail;
                 var code = detail && (detail.code || 0);
                 log('EVENT: error code=' + code);
@@ -397,6 +406,7 @@
                         var ytData = JSON.parse(ev.data);
                         if (ytData.event === 'onError' && ytData.info) {
                             log('YT onError: ' + ytData.info);
+                            if (playerVid !== currentVid) return;
                             triggerError(ytData.info);
                         }
                     } catch(e) {}
@@ -405,6 +415,7 @@
                     try {
                         var ytData = JSON.parse(ev.data);
                         log('YT onStateChange: ' + ytData.info);
+                        if (playerVid !== currentVid) return;
                         if (ytData.info === 1 || ytData.info === 3) markPlaybackStarted();
                         if (ytData.info === 2 && userWantsPlayback && !hasActiveError) {
                             sendDirectCommand('playVideo');
@@ -414,6 +425,7 @@
                 if (ev.data.indexOf('infoDelivery') !== -1) {
                     try {
                         var ytData = JSON.parse(ev.data);
+                        if (playerVid !== currentVid) return;
                         if (ytData.info && typeof ytData.info.duration === 'number' && ytData.info.duration > 0) {
                             postToParent({ type: 'duration', duration: ytData.info.duration });
                         }
@@ -477,6 +489,7 @@
 
         ytCaptureHandler = function(ev) {
             if (hasActiveError) return;
+            if (playerVid !== currentVid) return;
             if (typeof ev.data !== 'string') return;
             if (ev.data.indexOf('onError') === -1) return;
             try {
