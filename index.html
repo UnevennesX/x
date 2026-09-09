@@ -118,10 +118,15 @@
             5: 'Error de decodificación en el reproductor HTML5.'
         };
 
+        function log(msg) {
+            console.log('[X-Player]', msg, 'vid=' + currentVid, 'err=' + hasActiveError, 'ready=' + isReadyReported, 'playing=' + isPlayingConfirmed, 'init=' + isVidstackInitialized);
+        }
+
         function postToParent(data) {
             try {
+                log('postToParent: ' + JSON.stringify(data));
                 window.parent.postMessage(Object.assign({ source: 'x-player', videoId: currentVid }, data), '*');
-            } catch (e) {}
+            } catch (e) { log('postToParent error: ' + e); }
         }
 
         function showSpinner() {
@@ -141,9 +146,11 @@
 
         function startLoadWatchdog() {
             clearLoadWatchdog();
+            log('startLoadWatchdog: timeout=' + LOAD_TIMEOUT_MS + 'ms');
             loadWatchdogTimer = setTimeout(function() {
-                if (hasActiveError || isPlayingConfirmed) return;
+                if (hasActiveError || isPlayingConfirmed) { log('watchdog: skipped (err=' + hasActiveError + ' playing=' + isPlayingConfirmed + ')'); return; }
                 var detectedErr = detectVidstackError();
+                log('watchdog FIRED: detectedErr=' + JSON.stringify(detectedErr));
                 triggerError(detectedErr || 150);
             }, LOAD_TIMEOUT_MS);
         }
@@ -165,7 +172,8 @@
         }
 
         function triggerError(code) {
-            if (hasActiveError) return;
+            if (hasActiveError) { log('triggerError BLOCKED (already active): ' + code); return; }
+            log('triggerError: ' + code);
             hasActiveError = true;
             clearLoadWatchdog();
             hideSpinner();
@@ -183,6 +191,7 @@
         }
 
         function clearError() {
+            if (hasActiveError) log('clearError');
             hasActiveError = false;
             errorView.classList.remove('active');
             try { player.style.visibility = ''; } catch(e) {}
@@ -190,7 +199,8 @@
         }
 
         function markPlaybackStarted() {
-            if (hasActiveError) return;
+            if (hasActiveError) { log('markPlaybackStarted BLOCKED (err)'); return; }
+            log('markPlaybackStarted');
             isPlayingConfirmed = true;
             clearLoadWatchdog();
             hideSpinner();
@@ -225,6 +235,7 @@
                     frame = provider.querySelector('iframe') || (provider.shadowRoot && provider.shadowRoot.querySelector('iframe'));
                 }
             }
+            if (!frame) log('getActiveYouTubeIframe: NOT FOUND');
             return frame;
         }
 
@@ -232,19 +243,23 @@
             try {
                 const frame = getActiveYouTubeIframe();
                 if (frame && frame.contentWindow) {
+                    log('sendDirectCommand: ' + funcName + ' args=' + JSON.stringify(args));
                     frame.contentWindow.postMessage(JSON.stringify({
                         event: 'command',
                         func: funcName,
                         args: args || []
                     }), '*');
                     return true;
+                } else {
+                    log('sendDirectCommand FAILED: no frame found');
                 }
-            } catch (e) {}
+            } catch (e) { log('sendDirectCommand error: ' + e); }
             return false;
         }
 
         function safePlay() {
-            if (!player || hasActiveError) return;
+            if (!player || hasActiveError) { log('safePlay BLOCKED: player=' + !!player + ' err=' + hasActiveError); return; }
+            log('safePlay: attempting play');
             userWantsPlayback = true;
 
             sendDirectCommand('playVideo');
@@ -252,11 +267,10 @@
             try {
                 const prom = player.play();
                 if (prom && typeof prom.catch === 'function') {
-                    prom.catch(() => {
-                        sendDirectCommand('playVideo');
-                    });
+                    prom.catch((e) => { log('safePlay: player.play() rejected: ' + e); sendDirectCommand('playVideo'); });
                 }
             } catch (e) {
+                log('safePlay: player.play() threw: ' + e);
                 sendDirectCommand('playVideo');
             }
         }
@@ -268,6 +282,7 @@
         }
 
         function loadVideoDirectly(vid, timeSec, autoplay) {
+            log('loadVideoDirectly START: vid=' + vid + ' time=' + timeSec + ' autoplay=' + autoplay);
             currentVid = vid;
             clearError();
             isReadyReported = false;
@@ -280,7 +295,10 @@
             const t = Number(timeSec) || 0;
 
             const iframe = getActiveYouTubeIframe();
+            log('loadVideoDirectly: isVidstackInitialized=' + isVidstackInitialized + ' iframe=' + !!iframe);
+
             if (isVidstackInitialized && iframe) {
+                log('loadVideoDirectly: using sendDirectCommand loadVideoById');
                 sendDirectCommand('loadVideoById', [{
                     videoId: vid,
                     startSeconds: t
@@ -294,10 +312,12 @@
                 return;
             }
 
+            log('loadVideoDirectly: setting player.src');
             isVidstackInitialized = true;
             player.src = 'youtube/' + vid;
 
             const onLoaded = () => {
+                log('loadVideoDirectly: can-play fired');
                 player.removeEventListener('can-play', onLoaded);
                 if (t > 0) forceSeek(t);
 
@@ -316,14 +336,17 @@
 
         if (player) {
             if (initialVid) {
+                log('Init: loading initialVid=' + initialVid);
                 loadVideoDirectly(initialVid, startTime, wantsAutoplay);
             } else {
+                log('Init: no initialVid, hiding spinner');
                 hideSpinner();
             }
 
-            player.addEventListener('playing', markPlaybackStarted);
+            player.addEventListener('playing', () => { log('EVENT: playing'); markPlaybackStarted(); });
 
             player.addEventListener('pause', () => {
+                log('EVENT: pause userWants=' + userWantsPlayback + ' err=' + hasActiveError);
                 if (userWantsPlayback && !hasActiveError) {
                     sendDirectCommand('playVideo');
                     setTimeout(() => {
@@ -346,10 +369,12 @@
 
             player.addEventListener('loaded-metadata', () => {
                 const dur = Number(player.duration) || 0;
+                log('EVENT: loaded-metadata dur=' + dur);
                 if (dur > 0) postToParent({ type: 'duration', duration: dur });
             });
 
             player.addEventListener('ended', () => {
+                log('EVENT: ended');
                 userWantsPlayback = false;
                 postToParent({ type: 'ended' });
             });
@@ -357,6 +382,7 @@
             player.addEventListener('error', (ev) => {
                 const detail = ev && ev.detail;
                 const code = detail && (detail.code || 0);
+                log('EVENT: error code=' + code + ' detail=' + JSON.stringify(detail));
                 if (code >= 4 || code === 0) {
                     const err = (detail && (detail.message || detail.error)) || 'Playback Error';
                     triggerError(err);
@@ -370,12 +396,14 @@
                 if (ev.data.includes('onError')) {
                     try {
                         const ytData = JSON.parse(ev.data);
+                        log('YT onError: ' + JSON.stringify(ytData));
                         if (ytData.event === 'onError' && ytData.info) triggerError(ytData.info);
                     } catch (e) {}
                 }
                 if (ev.data.includes('onStateChange')) {
                     try {
                         const ytData = JSON.parse(ev.data);
+                        log('YT onStateChange: info=' + ytData.info);
                         if (ytData.info === 1 || ytData.info === 3) markPlaybackStarted();
                         if (ytData.info === 2 && userWantsPlayback && !hasActiveError) {
                             sendDirectCommand('playVideo');
@@ -389,6 +417,7 @@
             if (!data || typeof data !== 'object' || data.source !== 'voice-eva') return;
 
             const action = data.cmd || data.type;
+            log('CMD received: ' + action + ' vid=' + data.videoId);
 
             switch (action) {
                 case 'load':
@@ -455,6 +484,7 @@
             if (ev.data.indexOf('onError') === -1) return;
             try {
                 var ytData = JSON.parse(ev.data);
+                log('CAPTURE onError: ' + JSON.stringify(ytData));
                 if (ytData.event === 'onError' && ytData.info) {
                     triggerError(ytData.info);
                 }
