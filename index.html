@@ -81,7 +81,7 @@
     <script>
         const LOG_ENDPOINT = "https://voice-eva.koyeb.app/api/video-error-log";
 
-        // Impedir que scripts o navegadores pausen por cambio de pestaña/visibilidad
+        // Impedir que scripts de visibilidad pausen la ejecución interna
         try {
             Object.defineProperty(document, 'hidden', { get: () => false });
             Object.defineProperty(document, 'visibilityState', { get: () => 'visible' });
@@ -89,13 +89,8 @@
             Object.defineProperty(Document.prototype, 'visibilityState', { get: () => 'visible' });
         } catch (e) {}
 
-        document.addEventListener('visibilitychange', (e) => {
-            e.stopImmediatePropagation();
-        }, true);
-
-        window.addEventListener('visibilitychange', (e) => {
-            e.stopImmediatePropagation();
-        }, true);
+        document.addEventListener('visibilitychange', (e) => { e.stopImmediatePropagation(); }, true);
+        window.addEventListener('visibilitychange', (e) => { e.stopImmediatePropagation(); }, true);
 
         const params = new URLSearchParams(window.location.search);
         const initialVid = params.get('v');
@@ -121,7 +116,6 @@
         let userWantsPlayback = wantsAutoplay;
         let loadWatchdogTimer = null;
         let _playRetryTimer = null;
-        let _unmuteTimers = [];
         const LOAD_TIMEOUT_MS = 12000;
 
         const YT_ERRORS = {
@@ -181,7 +175,7 @@
             clearLoadWatchdog();
             loadWatchdogTimer = setTimeout(() => {
                 if (hasActiveError || isPlayingConfirmed) return;
-                log('Watchdog: Reintentando arranque en background...');
+                log('Watchdog: Reintentando arranque...');
                 if (userWantsPlayback) safePlay();
             }, LOAD_TIMEOUT_MS);
         }
@@ -242,25 +236,38 @@
             return false;
         }
 
+        function applySoundState() {
+            if (desiredMuted) {
+                player.muted = true;
+                sendDirectCommand('mute');
+            } else {
+                player.muted = false;
+                player.volume = currentVolume / 100;
+                sendDirectCommand('unMute');
+                sendDirectCommand('setVolume', [currentVolume]);
+            }
+        }
+
+        // HACK: Intentar reproducir DIRECTAMENTE CON SONIDO.
+        // Solo silenciar si el navegador tira una excepción de Autoplay real.
         function safePlay() {
             if (!player || hasActiveError || !isMediaReady) return;
             userWantsPlayback = true;
 
-            // Arrancamos silenciado en YouTube para saltar la barrera de background de Chromium
-            if (!isPlayingConfirmed) {
-                player.muted = true;
-                sendDirectCommand('mute');
-            }
-
+            applySoundState();
             sendDirectCommand('playVideo');
 
             try {
                 const prom = player.play();
                 if (prom && typeof prom.catch === 'function') {
-                    prom.catch(() => {
-                        player.muted = true;
-                        sendDirectCommand('mute');
-                        sendDirectCommand('playVideo');
+                    prom.catch((err) => {
+                        // Si Chromium bloquea por falta de interacción, arrancar con mute y desmutear en el acto
+                        if (err && err.name === 'NotAllowedError') {
+                            player.muted = true;
+                            sendDirectCommand('mute');
+                            sendDirectCommand('playVideo');
+                            setTimeout(applySoundState, 200);
+                        }
                     });
                 }
             } catch (e) {}
@@ -270,41 +277,13 @@
                 if (!hasActiveError && !isPlayingConfirmed && userWantsPlayback && isMediaReady) {
                     safePlay();
                 }
-            }, 1800);
+            }, 1500);
         }
 
         function forceSeek(timeSec) {
             const target = Math.max(0, Number(timeSec) || 0);
             try { player.currentTime = target; } catch (e) {}
             sendDirectCommand('seekTo', [target, true]);
-        }
-
-        function clearUnmuteTimers() {
-            while (_unmuteTimers.length) {
-                clearTimeout(_unmuteTimers.pop());
-            }
-        }
-
-        // Hack: Desmuteo escalonado para asegurar audio inmediato sin que Chromium lo corte
-        function performStaggeredUnmute() {
-            if (desiredMuted) return;
-            clearUnmuteTimers();
-
-            const applyUnmute = () => {
-                if (desiredMuted) return;
-                try {
-                    player.muted = false;
-                    sendDirectCommand('unMute');
-                    sendDirectCommand('setVolume', [currentVolume]);
-                    player.volume = currentVolume / 100;
-                } catch (e) {}
-            };
-
-            // Ráfaga escalonada sincronizada con el inicio del buffer
-            applyUnmute();
-            _unmuteTimers.push(setTimeout(applyUnmute, 120));
-            _unmuteTimers.push(setTimeout(applyUnmute, 450));
-            _unmuteTimers.push(setTimeout(applyUnmute, 1100));
         }
 
         function markPlaybackStarted() {
@@ -323,7 +302,8 @@
             videoCover.classList.add('hidden');
             clearError();
 
-            performStaggeredUnmute();
+            // Asegurar que el volumen y desmuteo queden activos
+            applySoundState();
 
             if (!isReadyReported) {
                 isReadyReported = true;
@@ -339,7 +319,6 @@
             if (currentVid === vid && isPlayingConfirmed && !hasActiveError) {
                 if (autoplay) {
                     safePlay();
-                    performStaggeredUnmute();
                 }
                 return;
             }
@@ -361,9 +340,8 @@
                 startLoadWatchdog();
             }
 
-            // Inicio con mute defensivo para garantizar carga instantánea sin esperar gestos
-            player.muted = true;
-            sendDirectCommand('mute');
+            // HACK: NO forzamos mute aquí. Si el usuario no lo tiene silenciado, configuramos sonido normal
+            applySoundState();
 
             player.src = 'youtube/' + vid;
 
@@ -396,20 +374,8 @@
                 if (!readyFired && !hasActiveError) {
                     fireReady();
                 }
-            }, 1200);
+            }, 1000);
         }
-
-        // Cualquier toque dentro del iframe desbloquea el audio de inmediato
-        function onLocalInteraction() {
-            if (!desiredMuted && (player.muted || currentVolume > 0)) {
-                performStaggeredUnmute();
-            }
-            if (userWantsPlayback && player.paused && isMediaReady) {
-                safePlay();
-            }
-        }
-        window.addEventListener('click', onLocalInteraction, { passive: true, capture: true });
-        window.addEventListener('touchstart', onLocalInteraction, { passive: true, capture: true });
 
         if (player) {
             if (initialVid) {
@@ -424,9 +390,7 @@
                 if (userWantsPlayback && !hasActiveError && isMediaReady) {
                     setTimeout(() => {
                         if (userWantsPlayback && player.paused && isMediaReady) {
-                            const p = player.play();
-                            if (p && p.catch) p.catch(() => {});
-                            sendDirectCommand('playVideo');
+                            safePlay();
                         }
                     }, 100);
                     return;
@@ -437,9 +401,9 @@
             player.addEventListener('time-update', () => {
                 if (player.currentTime > 0) hideSpinner();
 
-                // Autocorrección si el audio sigue muteado por Chromium con el streaming en marcha
-                if (!desiredMuted && player.currentTime > 0.3 && player.muted) {
-                    performStaggeredUnmute();
+                // Autocorrección si quedó en mute involuntario
+                if (!desiredMuted && player.muted && player.currentTime > 0.1) {
+                    applySoundState();
                 }
 
                 postToParent({
@@ -477,16 +441,6 @@
                 }
             });
         }
-
-        document.addEventListener('visibilitychange', () => {
-            if (!document.hidden && !hasActiveError && !isPlayingConfirmed && currentVid) {
-                startLoadWatchdog();
-                if (userWantsPlayback && isMediaReady) {
-                    safePlay();
-                    performStaggeredUnmute();
-                }
-            }
-        });
 
         window.addEventListener('message', (ev) => {
             if (typeof ev.data === 'string') {
@@ -535,12 +489,10 @@
                     userWantsPlayback = true;
                     if (!hasActiveError && isMediaReady) {
                         safePlay();
-                        performStaggeredUnmute();
                     }
                     break;
                 case 'pause':
                     userWantsPlayback = false;
-                    clearUnmuteTimers();
                     try { player.pause(); } catch (e) {}
                     sendDirectCommand('pauseVideo');
                     hideSpinner();
@@ -553,24 +505,20 @@
                 case 'setVolume':
                     if (typeof data.volume !== 'undefined') {
                         currentVolume = Math.max(0, Math.min(100, Number(data.volume)));
-                        player.volume = currentVolume / 100;
-                        sendDirectCommand('setVolume', [currentVolume]);
+                        applySoundState();
                     }
                     break;
                 case 'mute':
                     desiredMuted = true;
-                    clearUnmuteTimers();
-                    player.muted = true;
-                    sendDirectCommand('mute');
+                    applySoundState();
                     break;
                 case 'unmute':
                     desiredMuted = false;
-                    performStaggeredUnmute();
+                    applySoundState();
                     break;
                 case 'stop':
                     userWantsPlayback = false;
                     clearLoadWatchdog();
-                    clearUnmuteTimers();
                     try { player.pause(); } catch (e) {}
                     sendDirectCommand('stopVideo');
                     clearError();
