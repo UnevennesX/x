@@ -389,7 +389,7 @@
             mp.addEventListener('time-update', function() {
                 if (playerVid !== currentVid) return;
                 if (player && player.currentTime > 0) hideSpinner();
-                if (player && !player.paused)PlayRetries();
+                if (player && !player.paused) resetPlayRetries();
                 var dur = Number(player ? player.duration : 0) || 0;
                 var isPlaying = player ? !player.paused : false;
                 postToParent({
