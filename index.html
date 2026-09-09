@@ -306,6 +306,7 @@
         function loadVideoDirectly(vid, timeSec, autoplay) {
             currentVid = vid;
             clearError();
+            hasActiveError = false;
             isPlayingConfirmed = false;
             isReadyReported = false;
             userWantsPlayback = !!autoplay;
@@ -374,6 +375,7 @@
             player.addEventListener('playing', markPlaybackStarted);
 
             player.addEventListener('pause', () => {
+                postToParent({ type: 'paused' });
                 // Solo forzamos play si el usuario realmente quería que siguiera sonando
                 if (userWantsPlayback && !hasActiveError && isReadyReported) {
                     sendDirectCommand('playVideo');
