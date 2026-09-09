@@ -200,12 +200,29 @@
             clearLoadWatchdog();
         }
 
+        function hideVidstackSpinner() {
+            try {
+                var els = player.querySelectorAll('media-loading-indicator, .vds-loading-indicator, .vds-loading-spinner, [data-media-loading-indicator]');
+                for (var i = 0; i < els.length; i++) els[i].style.display = 'none';
+                if (player.shadowRoot) {
+                    var slEls = player.shadowRoot.querySelectorAll('media-loading-indicator, .vds-loading-indicator, .vds-loading-spinner, [data-media-loading-indicator]');
+                    for (var j = 0; j < slEls.length; j++) slEls[j].style.display = 'none';
+                }
+                var provider = player.querySelector('media-provider');
+                if (provider && provider.shadowRoot) {
+                    var pvEls = provider.shadowRoot.querySelectorAll('media-loading-indicator, .vds-loading-indicator, .vds-loading-spinner');
+                    for (var k = 0; k < pvEls.length; k++) pvEls[k].style.display = 'none';
+                }
+            } catch(e) {}
+        }
+
         function markPlaybackStarted() {
             if (hasActiveError) { log('markPlaybackStarted BLOCKED (err)'); return; }
             log('markPlaybackStarted');
             isPlayingConfirmed = true;
             clearLoadWatchdog();
             hideSpinner();
+            hideVidstackSpinner();
             videoCover.classList.add('hidden');
             clearError();
 
@@ -378,11 +395,23 @@
 
             player.addEventListener('time-update', () => {
                 if (player.currentTime > 0) hideSpinner();
+                var dur = Number(player.duration) || 0;
                 var isPlaying = usingDirectYT ? !hasActiveError && userWantsPlayback : !player.paused;
+                if (usingDirectYT) {
+                    hideVidstackSpinner();
+                    if (dur === 0) {
+                        try {
+                            var frame = getActiveYouTubeIframe();
+                            if (frame && frame.contentWindow) {
+                                frame.contentWindow.postMessage(JSON.stringify({event:'command',func:'getDuration',args:[]}), '*');
+                            }
+                        } catch(e) {}
+                    }
+                }
                 postToParent({
                     type: 'progress',
                     time: Number(player.currentTime) || 0,
-                    duration: Number(player.duration) || 0,
+                    duration: dur,
                     playing: isPlaying
                 });
             });
@@ -427,6 +456,15 @@
                         if (ytData.info === 1 || ytData.info === 3) markPlaybackStarted();
                         if (ytData.info === 2 && userWantsPlayback && !hasActiveError) {
                             sendDirectCommand('playVideo');
+                        }
+                    } catch (e) {}
+                }
+                if (ev.data.includes('infoDelivery')) {
+                    try {
+                        const ytData = JSON.parse(ev.data);
+                        if (ytData.info && typeof ytData.info.duration === 'number' && ytData.info.duration > 0) {
+                            log('YT infoDelivery: duration=' + ytData.info.duration);
+                            postToParent({ type: 'duration', duration: ytData.info.duration });
                         }
                     } catch (e) {}
                 }
