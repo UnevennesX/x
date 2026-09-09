@@ -81,10 +81,17 @@
     <script>
         const LOG_ENDPOINT = "https://voice-eva.koyeb.app/api/video-error-log";
 
+        // ── ANTI-SUSPENSIÓN: Evitar que Chromium detecte la pestaña como oculta ──
         try {
             Object.defineProperty(document, 'hidden', { get: () => false });
             Object.defineProperty(document, 'visibilityState', { get: () => 'visible' });
+            Object.defineProperty(Document.prototype, 'hidden', { get: () => false });
+            Object.defineProperty(Document.prototype, 'visibilityState', { get: () => 'visible' });
         } catch (e) {}
+
+        document.addEventListener('visibilitychange', (e) => {
+            e.stopImmediatePropagation();
+        }, true);
 
         window.addEventListener('visibilitychange', (e) => {
             e.stopImmediatePropagation();
@@ -149,7 +156,7 @@
                     fetch(LOG_ENDPOINT, { method: 'POST', body: blob, keepalive: true }).catch(() => {});
                 }
             } catch (err) {
-                log('No se pudo enviar log a Koyeb: ' + err.message);
+                log('No se pudo enviar log a servidor: ' + err.message);
             }
         }
 
@@ -201,6 +208,7 @@
             clearLoadWatchdog();
         }
 
+        // ── RESTAURACIÓN DE AUDIO REAL ──
         function applyAudioSettings() {
             if (desiredMuted) {
                 player.muted = true;
@@ -223,7 +231,7 @@
             videoCover.classList.add('hidden');
             clearError();
 
-            // Desmuteo y volumen automático en cuanto arranca el stream
+            // Desmuteo automático inmediato: ahora que el video ya rueda, Chromium permite audio
             applyAudioSettings();
 
             if (!isReadyReported) {
@@ -280,6 +288,7 @@
                     const prom = player.play();
                     if (prom && typeof prom.catch === 'function') {
                         prom.catch(() => {
+                            // Si el navegador bloquea el arranque con sonido, arrancar en mute temporal
                             player.muted = true;
                             sendDirectCommand('mute');
                             sendDirectCommand('playVideo');
@@ -324,11 +333,11 @@
                 startLoadWatchdog();
             }
 
-            // Iniciar en mute siempre para que Chromium permita el autoplay sin bloqueo
+            // INICIAR SIEMPRE MUTED para garantizar el autoplay en segundo plano
             player.muted = true;
             sendDirectCommand('mute');
 
-            // En Vidstack el cambio de video se realiza asignando player.src
+            // Asignación de fuente nativa en Vidstack
             player.src = 'youtube/' + vid;
 
             let readyFired = false;
@@ -355,6 +364,7 @@
             const onLoaded = () => { fireReady(); };
             player.addEventListener('can-play', onLoaded);
 
+            // Respaldo de seguridad en caso de que can-play tarde en emitirse
             setTimeout(() => {
                 if (!readyFired && !hasActiveError) {
                     fireReady();
@@ -371,16 +381,25 @@
 
             player.addEventListener('playing', markPlaybackStarted);
 
+            // ── ANTI-PAUSA DE PESTAÑA INACTIVA ──
             player.addEventListener('pause', () => {
-                postToParent({ type: 'paused' });
-                if (userWantsPlayback && !hasActiveError && isReadyReported) {
-                    sendDirectCommand('playVideo');
+                // Si la sala está en reproducción activa y el navegador intenta pausar en segundo plano:
+                if (userWantsPlayback && !hasActiveError) {
+                    setTimeout(() => {
+                        if (userWantsPlayback && player.paused) {
+                            try { player.play(); } catch(e) {}
+                            sendDirectCommand('playVideo');
+                        }
+                    }, 50);
+                    return; // ¡NO avisar a room-music.js de una pausa falsa!
                 }
+                postToParent({ type: 'paused' });
             });
 
             player.addEventListener('time-update', () => {
                 if (player.currentTime > 0) hideSpinner();
                 
+                // Si está rodando y el usuario no lo quiere silenciado, asegurar el audio
                 if (!player.paused && !desiredMuted && (player.muted || player.volume === 0)) {
                     applyAudioSettings();
                 }
@@ -421,6 +440,7 @@
             });
         }
 
+        // Si la pestaña vuelve a foco mientras cargaba, reiniciar watchdog
         document.addEventListener('visibilitychange', () => {
             if (!document.hidden && !hasActiveError && !isPlayingConfirmed && currentVid) {
                 log('Tab visible again — restarting watchdog.');
