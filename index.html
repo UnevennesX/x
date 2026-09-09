@@ -95,7 +95,6 @@
         const wantsAutoplay = params.get('autoplay') === '1';
         const startTime = Number(params.get('t')) || 0;
         
-        // Estado deseado por el usuario (volumen y mute)
         let currentVolume = params.has('vol') ? Math.max(0, Math.min(100, Number(params.get('vol')))) : 100;
         let desiredMuted = params.get('muted') === '1';
 
@@ -111,7 +110,6 @@
         let isReadyReported = false;
         let isPlayingConfirmed = false;
         let userWantsPlayback = wantsAutoplay;
-        let isVidstackInitialized = false;
         let loadWatchdogTimer = null;
         const LOAD_TIMEOUT_MS = 12000;
 
@@ -203,7 +201,6 @@
             clearLoadWatchdog();
         }
 
-        // Aplicar volumen y desmuteo real
         function applyAudioSettings() {
             if (desiredMuted) {
                 player.muted = true;
@@ -218,7 +215,7 @@
 
         function markPlaybackStarted() {
             if (hasActiveError) return;
-            log('markPlaybackStarted: Video reproduciéndose.');
+            log('markPlaybackStarted: Video reproduciéndose de forma continua.');
             isPlayingConfirmed = true;
             clearLoadWatchdog();
 
@@ -226,8 +223,7 @@
             videoCover.classList.add('hidden');
             clearError();
 
-            // DESMUTEO AUTOMÁTICO INMEDIATO:
-            // Si el usuario no tiene mute activado, restaurar volumen y desmutear ya mismo
+            // Desmuteo y volumen automático en cuanto arranca el stream
             applyAudioSettings();
 
             if (!isReadyReported) {
@@ -269,20 +265,6 @@
                     return true;
                 }
             } catch (e) {}
-
-            setTimeout(() => {
-                try {
-                    const retryFrame = getActiveYouTubeIframe();
-                    if (retryFrame && retryFrame.contentWindow) {
-                        retryFrame.contentWindow.postMessage(JSON.stringify({
-                            event: 'command',
-                            func: funcName,
-                            args: args || []
-                        }), '*');
-                    }
-                } catch (e) {}
-            }, 500);
-
             return false;
         }
 
@@ -298,7 +280,6 @@
                     const prom = player.play();
                     if (prom && typeof prom.catch === 'function') {
                         prom.catch(() => {
-                            // Si el navegador bloquea el arranque con sonido, arrancar en mute temporal
                             player.muted = true;
                             sendDirectCommand('mute');
                             sendDirectCommand('playVideo');
@@ -343,27 +324,11 @@
                 startLoadWatchdog();
             }
 
-            // Reutilización directa si el reproductor ya está instanciado
-            const iframe = getActiveYouTubeIframe();
-            if (isVidstackInitialized && iframe) {
-                sendDirectCommand('loadVideoById', [vid, t]);
-                
-                postToParent({
-                    type: 'ready',
-                    duration: Number(player.duration) || 0,
-                    time: t
-                });
-                isReadyReported = true;
+            // Iniciar en mute siempre para que Chromium permita el autoplay sin bloqueo
+            player.muted = true;
+            sendDirectCommand('mute');
 
-                if (autoplay) {
-                    safePlay();
-                } else {
-                    hideSpinner();
-                }
-                return;
-            }
-
-            isVidstackInitialized = true;
+            // En Vidstack el cambio de video se realiza asignando player.src
             player.src = 'youtube/' + vid;
 
             let readyFired = false;
@@ -416,7 +381,6 @@
             player.addEventListener('time-update', () => {
                 if (player.currentTime > 0) hideSpinner();
                 
-                // Si ya está reproduciendo y no está silenciado intencionalmente, asegurar audio
                 if (!player.paused && !desiredMuted && (player.muted || player.volume === 0)) {
                     applyAudioSettings();
                 }
