@@ -140,20 +140,22 @@
             }
         }
 
-        // --- CORRECCIÓN 1: Watchdog modificado para evitar falsos Error 150 ---
         function startLoadWatchdog() {
             clearLoadWatchdog();
             loadWatchdogTimer = setTimeout(function() {
                 if (hasActiveError || isPlayingConfirmed) return;
-                log('watchdog FIRED - Tiempo de espera agotado, revisando errores reales.');
+                log('watchdog FIRED - Tiempo agotado sin reproducir. Comprobando bloqueos.');
                 
                 var detectedErr = detectVidstackError();
                 if (detectedErr) {
-                    triggerError(detectedErr); // Solo dispara error si hay una causa real
+                    triggerError(detectedErr); 
                 } else {
-                    // Si no hay error, el autoplay probablemente fue bloqueado. Ocultamos el spinner.
+                    // AQUÍ ESTABA EL ERROR:
+                    // Si no hay error, significa que el navegador bloqueó el autoplay en silencio.
+                    // Ocultamos la pantalla negra ('hidden') para que se vea el reproductor
+                    // y el usuario pueda darle al botón de Play manualmente.
                     hideSpinner(); 
-                    videoCover.classList.remove('hidden'); 
+                    videoCover.classList.add('hidden'); 
                 }
             }, LOAD_TIMEOUT_MS);
         }
@@ -229,7 +231,6 @@
             return false;
         }
 
-        // --- CORRECCIÓN 3: safePlay modificado para manejar bloqueos de Autoplay sin romper ---
         function safePlay() {
             if (!player || hasActiveError) return;
             userWantsPlayback = true;
@@ -238,7 +239,10 @@
                 const prom = player.play();
                 if (prom && typeof prom.catch === 'function') {
                     prom.catch(function(e) { 
-                        log('Autoplay bloqueado por el navegador: ' + e);
+                        log('Autoplay bloqueado (promesa rechazada): ' + e);
+                        // Si falla, quitamos la capa negra rápido para permitir play manual
+                        hideSpinner();
+                        videoCover.classList.add('hidden');
                         sendDirectCommand('playVideo'); 
                     });
                 }
@@ -259,7 +263,7 @@
             isPlayingConfirmed = true;
             clearLoadWatchdog();
             hideSpinner();
-            videoCover.classList.add('hidden');
+            videoCover.classList.add('hidden'); // Oculta la capa al reproducir
             clearError();
 
             postToParent({
@@ -303,6 +307,12 @@
             mp.setAttribute('log-level', 'silent');
             mp.setAttribute('crossorigin', '');
             mp.setAttribute('playsinline', '');
+            
+            // Asignamos el autoplay nativo a Vidstack para mejorar la efectividad
+            if (autoplay) {
+                mp.setAttribute('autoplay', '');
+            }
+
             mp.setAttribute('tabindex', '0');
             mp.setAttribute('role', 'region');
             mp.setAttribute('aria-label', 'Video Player');
@@ -360,14 +370,13 @@
                 postToParent({ type: 'ended' });
             });
 
-            // --- CORRECCIÓN 2: Ignorar micro-errores falsos de Vidstack (code === 0) ---
             mp.addEventListener('error', function(ev) {
                 if (playerVid !== currentVid) return;
                 var detail = ev && ev.detail;
                 var code = detail && (detail.code || 0);
                 log('EVENT: error code=' + code);
                 
-                if (code >= 4) { // Eliminamos "|| code === 0"
+                if (code >= 4) {
                     var err = (detail && (detail.message || detail.error)) || 'Playback Error';
                     triggerError(err);
                 }
@@ -385,7 +394,10 @@
             userWantsPlayback = !!autoplay;
             usingDirectYT = false;
             showSpinner();
-            videoCover.classList.remove('hidden');
+            
+            // Volvemos a poner la capa negra para la carga del nuevo video
+            videoCover.classList.remove('hidden'); 
+            
             errorView.classList.remove('active');
             hasActiveError = false;
             if (autoplay) startLoadWatchdog();
@@ -396,14 +408,22 @@
                 log('can-play fired for ' + vid);
                 player.removeEventListener('can-play', onCanPlay);
                 if (t > 0) forceSeek(t);
+                
                 postToParent({
                     type: 'ready',
                     duration: Number(player.duration) || 0,
                     time: Number(player.currentTime) || 0
                 });
                 isReadyReported = true;
-                if (autoplay) safePlay();
-                else hideSpinner();
+                
+                if (autoplay) {
+                    safePlay();
+                } else {
+                    // Si no queremos autoplay, DEBEMOS quitar la pantalla negra
+                    // para que el usuario pueda darle clic al play de YouTube manualmente.
+                    hideSpinner();
+                    videoCover.classList.add('hidden'); 
+                }
             };
 
             createPlayer(vid, t, autoplay);
