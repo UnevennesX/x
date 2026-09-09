@@ -26,11 +26,6 @@
             display: flex; align-items: center; justify-content: center;
             background: #000000;
         }
-        #rmExternalPlayer {
-            width: 100% !important; height: 100% !important;
-            max-width: none !important; margin: 0 !important;
-            --media-font-family: inherit;
-        }
         .video-cover {
             position: absolute; inset: 0; background: #000000;
             z-index: 10; pointer-events: none; opacity: 1;
@@ -72,10 +67,6 @@
             <span id="errCode" class="error-tag">ERROR DE REPRODUCCIÓN</span>
             <p id="errText" class="error-msg">No se pudo reproducir este video.</p>
         </div>
-
-        <media-player id="rmExternalPlayer" class="vds-player" load="eager" stream-type="on-demand" log-level="silent" crossorigin playsinline data-media-player tabindex="0" role="region" aria-label="Video Player">
-            <media-provider keep-alive data-media-provider></media-provider>
-        </media-player>
     </div>
 
     <script>
@@ -93,23 +84,27 @@
         const wantsAutoplay = params.get('autoplay') === '1';
         const startTime = Number(params.get('t')) || 0;
 
-        const player = document.getElementById('rmExternalPlayer');
+        const playerHost = document.getElementById('playerHost');
         const videoCover = document.getElementById('videoCover');
         const spinner = document.getElementById('loadingSpinner');
         const errorView = document.getElementById('errorView');
         const errCode = document.getElementById('errCode');
         const errText = document.getElementById('errText');
 
+        let player = null;
         let currentVid = initialVid || null;
         let hasActiveError = false;
         let isReadyReported = false;
         let userWantsPlayback = wantsAutoplay;
-        let isVidstackInitialized = false;
         let usingDirectYT = false;
 
         var loadWatchdogTimer = null;
         var isPlayingConfirmed = false;
         var LOAD_TIMEOUT_MS = 12000;
+        var ytMsgHandler = null;
+        var ytBubbleHandler = null;
+        var ytCaptureHandler = null;
+        var ytStateChangeRetry = null;
 
         const ERRORS_MAP = {
             150: 'El autor bloqueó la reproducción externa o tiene restricciones de copyright.',
@@ -120,14 +115,13 @@
         };
 
         function log(msg) {
-            console.log('[X-Player]', msg, 'vid=' + currentVid, 'err=' + hasActiveError, 'ready=' + isReadyReported, 'playing=' + isPlayingConfirmed, 'init=' + isVidstackInitialized);
+            console.log('[X-Player]', msg, 'vid=' + currentVid, 'err=' + hasActiveError, 'ready=' + isReadyReported, 'playing=' + isPlayingConfirmed);
         }
 
         function postToParent(data) {
             try {
-                log('postToParent: ' + JSON.stringify(data));
                 window.parent.postMessage(Object.assign({ source: 'x-player', videoId: currentVid }, data), '*');
-            } catch (e) { log('postToParent error: ' + e); }
+            } catch (e) {}
         }
 
         function showSpinner() {
@@ -147,16 +141,16 @@
 
         function startLoadWatchdog() {
             clearLoadWatchdog();
-            log('startLoadWatchdog: timeout=' + LOAD_TIMEOUT_MS + 'ms');
             loadWatchdogTimer = setTimeout(function() {
-                if (hasActiveError || isPlayingConfirmed) { log('watchdog: skipped (err=' + hasActiveError + ' playing=' + isPlayingConfirmed + ')'); return; }
+                if (hasActiveError || isPlayingConfirmed) return;
+                log('watchdog FIRED');
                 var detectedErr = detectVidstackError();
-                log('watchdog FIRED: detectedErr=' + JSON.stringify(detectedErr));
                 triggerError(detectedErr || 150);
             }, LOAD_TIMEOUT_MS);
         }
 
         function detectVidstackError() {
+            if (!player) return null;
             try {
                 if (player.error) {
                     var e = player.error;
@@ -173,19 +167,17 @@
         }
 
         function triggerError(code) {
-            if (hasActiveError) { log('triggerError BLOCKED (already active): ' + code); return; }
+            if (hasActiveError) return;
             log('triggerError: ' + code);
             hasActiveError = true;
-            isVidstackInitialized = false;
             clearLoadWatchdog();
             hideSpinner();
             videoCover.classList.remove('hidden');
-            try { player.style.visibility = 'hidden'; } catch(e) {}
 
             const num = Number(code);
             const msg = (!isNaN(num) && ERRORS_MAP[num]) ? ERRORS_MAP[num] : String(code || 'No se pudo reproducir este video.');
 
-            errCode.textContent = !isNaN(num) ? `ERROR ${num}` : 'ERROR';
+            errCode.textContent = !isNaN(num) ? 'ERROR ' + num : 'ERROR';
             errText.textContent = msg;
             errorView.classList.add('active');
 
@@ -193,57 +185,13 @@
         }
 
         function clearError() {
-            if (hasActiveError) log('clearError');
             hasActiveError = false;
             errorView.classList.remove('active');
-            try { player.style.visibility = ''; } catch(e) {}
             clearLoadWatchdog();
-        }
-
-        function hideVidstackSpinner() {
-            try {
-                var els = player.querySelectorAll('media-loading-indicator, .vds-loading-indicator, .vds-loading-spinner, [data-media-loading-indicator]');
-                for (var i = 0; i < els.length; i++) els[i].style.display = 'none';
-                if (player.shadowRoot) {
-                    var slEls = player.shadowRoot.querySelectorAll('media-loading-indicator, .vds-loading-indicator, .vds-loading-spinner, [data-media-loading-indicator]');
-                    for (var j = 0; j < slEls.length; j++) slEls[j].style.display = 'none';
-                }
-                var provider = player.querySelector('media-provider');
-                if (provider && provider.shadowRoot) {
-                    var pvEls = provider.shadowRoot.querySelectorAll('media-loading-indicator, .vds-loading-indicator, .vds-loading-spinner');
-                    for (var k = 0; k < pvEls.length; k++) pvEls[k].style.display = 'none';
-                }
-            } catch(e) {}
-        }
-
-        function markPlaybackStarted() {
-            if (hasActiveError) { log('markPlaybackStarted BLOCKED (err)'); return; }
-            log('markPlaybackStarted');
-            isPlayingConfirmed = true;
-            clearLoadWatchdog();
-            hideSpinner();
-            hideVidstackSpinner();
-            videoCover.classList.add('hidden');
-            clearError();
-
-            postToParent({
-                type: 'progress',
-                time: Number(player.currentTime) || 0,
-                duration: Number(player.duration) || 0,
-                playing: true
-            });
-
-            if (!isReadyReported) {
-                isReadyReported = true;
-                postToParent({
-                    type: 'ready',
-                    duration: Number(player.duration) || 0,
-                    time: Number(player.currentTime) || 0
-                });
-            }
         }
 
         function getActiveYouTubeIframe() {
+            if (!player) return null;
             let frame = player.querySelector('iframe');
             if (!frame && player.shadowRoot) {
                 frame = player.shadowRoot.querySelector('iframe');
@@ -254,7 +202,6 @@
                     frame = provider.querySelector('iframe') || (provider.shadowRoot && provider.shadowRoot.querySelector('iframe'));
                 }
             }
-            if (!frame) log('getActiveYouTubeIframe: NOT FOUND');
             return frame;
         }
 
@@ -262,220 +209,223 @@
             try {
                 const frame = getActiveYouTubeIframe();
                 if (frame && frame.contentWindow) {
-                    log('sendDirectCommand: ' + funcName + ' args=' + JSON.stringify(args));
                     frame.contentWindow.postMessage(JSON.stringify({
                         event: 'command',
                         func: funcName,
                         args: args || []
                     }), '*');
                     return true;
-                } else {
-                    log('sendDirectCommand FAILED: no frame found');
                 }
-            } catch (e) { log('sendDirectCommand error: ' + e); }
+            } catch (e) {}
             return false;
         }
 
         function safePlay() {
-            if (!player || hasActiveError) { log('safePlay BLOCKED: player=' + !!player + ' err=' + hasActiveError); return; }
-            log('safePlay: attempting play');
+            if (!player || hasActiveError) return;
             userWantsPlayback = true;
-
             sendDirectCommand('playVideo');
-
             try {
                 const prom = player.play();
                 if (prom && typeof prom.catch === 'function') {
-                    prom.catch((e) => { log('safePlay: player.play() rejected: ' + e); sendDirectCommand('playVideo'); });
+                    prom.catch(function() { sendDirectCommand('playVideo'); });
                 }
             } catch (e) {
-                log('safePlay: player.play() threw: ' + e);
                 sendDirectCommand('playVideo');
             }
         }
 
         function forceSeek(timeSec) {
             const target = Math.max(0, Number(timeSec) || 0);
-            try { player.currentTime = target; } catch (e) {}
+            if (player) { try { player.currentTime = target; } catch (e) {} }
             sendDirectCommand('seekTo', [target, true]);
         }
 
-        function loadVideoDirectly(vid, timeSec, autoplay) {
-            log('loadVideoDirectly START: vid=' + vid + ' time=' + timeSec + ' autoplay=' + autoplay);
-            currentVid = vid;
+        function markPlaybackStarted() {
+            if (hasActiveError) return;
+            log('markPlaybackStarted');
+            isPlayingConfirmed = true;
+            clearLoadWatchdog();
+            hideSpinner();
+            videoCover.classList.add('hidden');
             clearError();
-            isReadyReported = false;
-            isPlayingConfirmed = false;
-            usingDirectYT = false;
-            userWantsPlayback = !!autoplay;
-            showSpinner();
-            videoCover.classList.remove('hidden');
-            if (autoplay) startLoadWatchdog();
 
-            const t = Number(timeSec) || 0;
+            postToParent({
+                type: 'progress',
+                time: Number(player ? player.currentTime : 0) || 0,
+                duration: Number(player ? player.duration : 0) || 0,
+                playing: true
+            });
 
-            const iframe = getActiveYouTubeIframe();
-            log('loadVideoDirectly: isVidstackInitialized=' + isVidstackInitialized + ' iframe=' + !!iframe);
+            if (!isReadyReported) {
+                isReadyReported = true;
+                postToParent({
+                    type: 'ready',
+                    duration: Number(player ? player.duration : 0) || 0,
+                    time: Number(player ? player.currentTime : 0) || 0
+                });
+            }
+        }
 
-            if (isVidstackInitialized && iframe) {
-                log('loadVideoDirectly: using sendDirectCommand loadVideoById');
-                usingDirectYT = true;
-                sendDirectCommand('loadVideoById', [{
-                    videoId: vid,
-                    startSeconds: t
-                }]);
-                
-                if (autoplay) {
+        function destroyPlayer() {
+            if (ytStateChangeRetry) { clearTimeout(ytStateChangeRetry); ytStateChangeRetry = null; }
+            if (player) {
+                try { player.pause(); } catch(e) {}
+                try { player.removeAttribute('src'); } catch(e) {}
+                try { player.load(); } catch(e) {}
+                try { player.remove(); } catch(e) {}
+                player = null;
+            }
+        }
+
+        function createPlayer(vid, timeSec, autoplay) {
+            destroyPlayer();
+
+            var mp = document.createElement('media-player');
+            mp.id = 'rmExternalPlayer';
+            mp.className = 'vds-player';
+            mp.setAttribute('load', 'eager');
+            mp.setAttribute('stream-type', 'on-demand');
+            mp.setAttribute('log-level', 'silent');
+            mp.setAttribute('crossorigin', '');
+            mp.setAttribute('playsinline', '');
+            mp.setAttribute('tabindex', '0');
+            mp.setAttribute('role', 'region');
+            mp.setAttribute('aria-label', 'Video Player');
+            mp.style.cssText = 'position:absolute;top:0;left:0;width:100%;height:100%;background:#000;';
+
+            var prov = document.createElement('media-provider');
+            prov.setAttribute('keep-alive', '');
+            mp.appendChild(prov);
+
+            playerHost.appendChild(mp);
+            player = mp;
+
+            mp.addEventListener('playing', function() {
+                log('EVENT: playing');
+                markPlaybackStarted();
+            });
+
+            mp.addEventListener('pause', function() {
+                log('EVENT: pause userWants=' + userWantsPlayback + ' err=' + hasActiveError);
+                if (userWantsPlayback && !hasActiveError) {
                     sendDirectCommand('playVideo');
                     setTimeout(function() {
-                        if (!isPlayingConfirmed && !hasActiveError) {
-                            log('loadVideoDirectly: retry playVideo #1');
-                            sendDirectCommand('playVideo');
+                        if (userWantsPlayback && player && player.paused) {
+                            safePlay();
                         }
-                    }, 500);
-                    setTimeout(function() {
-                        if (!isPlayingConfirmed && !hasActiveError) {
-                            log('loadVideoDirectly: retry playVideo #2');
-                            sendDirectCommand('playVideo');
-                        }
-                    }, 1500);
-                } else {
-                    hideSpinner();
+                    }, 100);
                 }
-                return;
-            }
+            });
 
-            log('loadVideoDirectly: setting player.src (fresh)');
-            isVidstackInitialized = true;
+            mp.addEventListener('time-update', function() {
+                if (player && player.currentTime > 0) hideSpinner();
+                var dur = Number(player ? player.duration : 0) || 0;
+                var isPlaying = !hasActiveError && userWantsPlayback;
+                postToParent({
+                    type: 'progress',
+                    time: Number(player ? player.currentTime : 0) || 0,
+                    duration: dur,
+                    playing: isPlaying
+                });
+            });
+
+            mp.addEventListener('loaded-metadata', function() {
+                var dur = Number(player ? player.duration : 0) || 0;
+                if (dur > 0) postToParent({ type: 'duration', duration: dur });
+            });
+
+            mp.addEventListener('ended', function() {
+                log('EVENT: ended');
+                userWantsPlayback = false;
+                postToParent({ type: 'ended' });
+            });
+
+            mp.addEventListener('error', function(ev) {
+                var detail = ev && ev.detail;
+                var code = detail && (detail.code || 0);
+                log('EVENT: error code=' + code);
+                if (code >= 4 || code === 0) {
+                    var err = (detail && (detail.message || detail.error)) || 'Playback Error';
+                    triggerError(err);
+                }
+            });
+
+            mp.src = 'youtube/' + vid;
+            log('createPlayer: player.src set to youtube/' + vid);
+        }
+
+        function loadVideoDirectly(vid, timeSec, autoplay) {
+            log('loadVideoDirectly: vid=' + vid + ' time=' + timeSec + ' autoplay=' + autoplay);
+            currentVid = vid;
             isPlayingConfirmed = false;
+            isReadyReported = false;
+            userWantsPlayback = !!autoplay;
             usingDirectYT = false;
-            player.src = 'youtube/' + vid;
+            showSpinner();
+            videoCover.classList.remove('hidden');
+            errorView.classList.remove('active');
+            hasActiveError = false;
+            if (autoplay) startLoadWatchdog();
 
-            const onLoaded = () => {
-                log('loadVideoDirectly: can-play fired');
-                player.removeEventListener('can-play', onLoaded);
+            var t = Number(timeSec) || 0;
+
+            var onCanPlay = function() {
+                log('can-play fired for ' + vid);
+                player.removeEventListener('can-play', onCanPlay);
                 if (t > 0) forceSeek(t);
-
                 postToParent({
                     type: 'ready',
                     duration: Number(player.duration) || 0,
                     time: Number(player.currentTime) || 0
                 });
                 isReadyReported = true;
-
                 if (autoplay) safePlay();
                 else hideSpinner();
             };
-            player.addEventListener('can-play', onLoaded);
+
+            createPlayer(vid, t, autoplay);
+            player.addEventListener('can-play', onCanPlay);
         }
 
-        if (player) {
-            if (initialVid) {
-                log('Init: loading initialVid=' + initialVid);
-                loadVideoDirectly(initialVid, startTime, wantsAutoplay);
-            } else {
-                log('Init: no initialVid, hiding spinner');
-                hideSpinner();
-            }
+        if (ytBubbleHandler) window.removeEventListener('message', ytBubbleHandler);
+        if (ytCaptureHandler) window.removeEventListener('message', ytCaptureHandler, true);
 
-            player.addEventListener('playing', () => { log('EVENT: playing'); markPlaybackStarted(); });
-
-            player.addEventListener('pause', () => {
-                log('EVENT: pause userWants=' + userWantsPlayback + ' err=' + hasActiveError + ' directYT=' + usingDirectYT);
-                if (usingDirectYT) return;
-                if (userWantsPlayback && !hasActiveError) {
-                    sendDirectCommand('playVideo');
-                    setTimeout(() => {
-                        if (userWantsPlayback && player.paused && !usingDirectYT) {
-                            safePlay();
-                        }
-                    }, 80);
-                }
-            });
-
-            player.addEventListener('time-update', () => {
-                if (player.currentTime > 0) hideSpinner();
-                var dur = Number(player.duration) || 0;
-                var isPlaying = usingDirectYT ? !hasActiveError && userWantsPlayback : !player.paused;
-                if (usingDirectYT) {
-                    hideVidstackSpinner();
-                    if (dur === 0) {
-                        try {
-                            var frame = getActiveYouTubeIframe();
-                            if (frame && frame.contentWindow) {
-                                frame.contentWindow.postMessage(JSON.stringify({event:'command',func:'getDuration',args:[]}), '*');
-                            }
-                        } catch(e) {}
-                    }
-                }
-                postToParent({
-                    type: 'progress',
-                    time: Number(player.currentTime) || 0,
-                    duration: dur,
-                    playing: isPlaying
-                });
-            });
-
-            player.addEventListener('loaded-metadata', () => {
-                const dur = Number(player.duration) || 0;
-                log('EVENT: loaded-metadata dur=' + dur);
-                if (dur > 0) postToParent({ type: 'duration', duration: dur });
-            });
-
-            player.addEventListener('ended', () => {
-                log('EVENT: ended');
-                userWantsPlayback = false;
-                postToParent({ type: 'ended' });
-            });
-
-            player.addEventListener('error', (ev) => {
-                const detail = ev && ev.detail;
-                const code = detail && (detail.code || 0);
-                log('EVENT: error code=' + code + ' detail=' + JSON.stringify(detail));
-                if (code >= 4 || code === 0) {
-                    const err = (detail && (detail.message || detail.error)) || 'Playback Error';
-                    triggerError(err);
-                }
-            });
-        }
-
-        // BUBBLE: comandos de Voice-Eva + YouTube state change
-        window.addEventListener('message', (ev) => {
+        ytBubbleHandler = function(ev) {
             if (typeof ev.data === 'string') {
-                if (ev.data.includes('onError')) {
+                if (ev.data.indexOf('onError') !== -1) {
                     try {
-                        const ytData = JSON.parse(ev.data);
-                        log('YT onError: ' + JSON.stringify(ytData));
-                        if (ytData.event === 'onError' && ytData.info) triggerError(ytData.info);
-                    } catch (e) {}
+                        var ytData = JSON.parse(ev.data);
+                        if (ytData.event === 'onError' && ytData.info) {
+                            log('YT onError: ' + ytData.info);
+                            triggerError(ytData.info);
+                        }
+                    } catch(e) {}
                 }
-                if (ev.data.includes('onStateChange')) {
+                if (ev.data.indexOf('onStateChange') !== -1) {
                     try {
-                        const ytData = JSON.parse(ev.data);
-                        log('YT onStateChange: info=' + ytData.info);
+                        var ytData = JSON.parse(ev.data);
+                        log('YT onStateChange: ' + ytData.info);
                         if (ytData.info === 1 || ytData.info === 3) markPlaybackStarted();
                         if (ytData.info === 2 && userWantsPlayback && !hasActiveError) {
                             sendDirectCommand('playVideo');
                         }
-                    } catch (e) {}
+                    } catch(e) {}
                 }
-                if (ev.data.includes('infoDelivery')) {
+                if (ev.data.indexOf('infoDelivery') !== -1) {
                     try {
-                        const ytData = JSON.parse(ev.data);
+                        var ytData = JSON.parse(ev.data);
                         if (ytData.info && typeof ytData.info.duration === 'number' && ytData.info.duration > 0) {
-                            log('YT infoDelivery: duration=' + ytData.info.duration);
                             postToParent({ type: 'duration', duration: ytData.info.duration });
                         }
-                    } catch (e) {}
+                    } catch(e) {}
                 }
                 return;
             }
 
-            const data = ev.data;
+            var data = ev.data;
             if (!data || typeof data !== 'object' || data.source !== 'voice-eva') return;
 
-            const action = data.cmd || data.type;
-            log('CMD received: ' + action + ' vid=' + data.videoId);
+            var action = data.cmd || data.type;
 
             switch (action) {
                 case 'load':
@@ -483,80 +433,66 @@
                         loadVideoDirectly(data.videoId, data.time, data.autoplay);
                     }
                     break;
-
                 case 'play':
                 case 'keepalive':
                     userWantsPlayback = true;
-                    if (!hasActiveError) {
-                        if (usingDirectYT) {
-                            sendDirectCommand('playVideo');
-                        } else {
-                            safePlay();
-                        }
-                    }
+                    if (!hasActiveError) safePlay();
                     break;
-
                 case 'pause':
                     userWantsPlayback = false;
-                    try { player.pause(); } catch (e) {}
+                    if (player) try { player.pause(); } catch(e) {}
                     sendDirectCommand('pauseVideo');
                     hideSpinner();
                     break;
-
                 case 'seek':
-                    if (typeof data.time !== 'undefined') {
-                        forceSeek(Number(data.time));
-                    }
+                    if (typeof data.time !== 'undefined') forceSeek(Number(data.time));
                     break;
-
                 case 'setVolume':
                     if (typeof data.volume !== 'undefined') {
-                        const v = Math.max(0, Math.min(100, Number(data.volume)));
-                        player.volume = v / 100;
+                        var v = Math.max(0, Math.min(100, Number(data.volume)));
+                        if (player) player.volume = v / 100;
                         sendDirectCommand('setVolume', [v]);
                     }
                     break;
-
                 case 'mute':
-                    player.muted = true;
+                    if (player) player.muted = true;
                     sendDirectCommand('mute');
                     break;
-
                 case 'unmute':
-                    player.muted = false;
+                    if (player) player.muted = false;
                     sendDirectCommand('unMute');
                     break;
-
                 case 'stop':
                     userWantsPlayback = false;
                     isPlayingConfirmed = false;
-                    isVidstackInitialized = false;
-                    usingDirectYT = false;
                     clearLoadWatchdog();
-                    try {
-                        player.pause();
-                    } catch (e) {}
-                    sendDirectCommand('stopVideo');
+                    destroyPlayer();
                     clearError();
                     hideSpinner();
                     videoCover.classList.remove('hidden');
                     break;
             }
-        });
+        };
+        window.addEventListener('message', ytBubbleHandler);
 
-        // CAPTURE PHASE: interceptar errores de YouTube ANTES de que Vidstack los consuma
-        window.addEventListener('message', function(ev) {
+        ytCaptureHandler = function(ev) {
             if (hasActiveError) return;
             if (typeof ev.data !== 'string') return;
             if (ev.data.indexOf('onError') === -1) return;
             try {
                 var ytData = JSON.parse(ev.data);
-                log('CAPTURE onError: ' + JSON.stringify(ytData));
                 if (ytData.event === 'onError' && ytData.info) {
                     triggerError(ytData.info);
                 }
-            } catch (e) {}
-        }, true);
+            } catch(e) {}
+        };
+        window.addEventListener('message', ytCaptureHandler, true);
+
+        if (initialVid) {
+            loadVideoDirectly(initialVid, startTime, wantsAutoplay);
+        } else {
+            hideSpinner();
+        }
     </script>
 </body>
 </html>
