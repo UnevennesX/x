@@ -110,18 +110,8 @@
         let userWantsPlayback = wantsAutoplay;
         let isVidstackInitialized = false;
         let loadWatchdogTimer = null;
-        let pendingSeek = startTime;
-        let desiredMuted = false;
-        let playRetries = 0;
-        let audioBlockedNotified = false;
         const LOAD_TIMEOUT_MS = 12000;
-        const MAX_PLAY_RETRIES = 3;
 
-        // Alcance de cada error, para que la sala distinga un video que nadie
-        // puede reproducir de un fallo que solo afecta a este dispositivo:
-        //   content = determinista para cualquier espectador
-        //   embed   = embed bloqueado o restricción regional (ambiguo)
-        //   local   = problema de este navegador o red
         const YT_ERRORS = {
             2:   { scope: 'content', msg: 'Identificador de video de YouTube no válido.' },
             5:   { scope: 'local',   msg: 'Error de decodificación en el reproductor HTML5.' },
@@ -140,7 +130,6 @@
             } catch (e) {}
         }
 
-        // REPORTE ASÍNCRONO SIN INTERFERENCIA A TU SERVIDOR EN KOYEB
         function reportErrorToServer(code, message) {
             try {
                 const payload = {
@@ -201,16 +190,13 @@
             videoCover.classList.remove('hidden');
 
             const num = Number(code);
-            const msg = (!isNaN(num) && ERRORS_MAP[num]) ? ERRORS_MAP[num] : String(code || 'No se pudo reproducir este video.');
+            const msg = (!isNaN(num) && YT_ERRORS[num]) ? YT_ERRORS[num].msg : String(code || 'No se pudo reproducir este video.');
 
             errCode.textContent = !isNaN(num) ? `ERROR ${num}` : 'ERROR';
             errText.textContent = msg;
             errorView.classList.add('active');
 
-            // 1. Avisa a tu iframe/ventana padre como siempre
             postToParent({ type: 'error', code: code, message: msg });
-
-            // 2. Envía el log en segundo plano a tu servidor externo en Koyeb
             reportErrorToServer(code, msg);
         }
 
@@ -220,7 +206,6 @@
             clearLoadWatchdog();
         }
 
-        // FUNCIÓN: Desmutea al primer toque del usuario sin pausar el video
         function enableAudioOnInteraction() {
             const unmuteHandler = () => {
                 log('Interacción detectada: activando sonido.');
@@ -242,10 +227,9 @@
             clearLoadWatchdog();
 
             hideSpinner();
-            videoCover.classList.add('hidden'); // Quita la pantalla negra
+            videoCover.classList.add('hidden');
             clearError();
 
-            // Dejamos listo el desmuteo automático para el momento en que el usuario toque la pantalla
             enableAudioOnInteraction();
 
             if (!isReadyReported) {
@@ -369,6 +353,13 @@
                 
                 sendDirectCommand('loadVideoById', [vid, t]);
                 
+                postToParent({
+                    type: 'ready',
+                    duration: Number(player.duration) || 0,
+                    time: t
+                });
+                isReadyReported = true;
+
                 if (autoplay) {
                     safePlay();
                 } else {
@@ -383,14 +374,17 @@
             }
             player.src = 'youtube/' + vid;
 
-            const onLoaded = () => {
+            let readyFired = false;
+            const fireReady = () => {
+                if (readyFired) return;
+                readyFired = true;
                 player.removeEventListener('can-play', onLoaded);
                 if (t > 0) forceSeek(t);
 
                 postToParent({
                     type: 'ready',
                     duration: Number(player.duration) || 0,
-                    time: Number(player.currentTime) || 0
+                    time: Number(player.currentTime) || t || 0
                 });
                 isReadyReported = true;
 
@@ -402,7 +396,18 @@
                     hideSpinner();
                 }
             };
+
+            const onLoaded = () => {
+                fireReady();
+            };
             player.addEventListener('can-play', onLoaded);
+
+            // Respaldo de seguridad en caso de que can-play tarde en emitirse con la ventana minimizada
+            setTimeout(() => {
+                if (!readyFired && !hasActiveError) {
+                    fireReady();
+                }
+            }, 1800);
         }
 
         if (player) {
@@ -416,7 +421,6 @@
 
             player.addEventListener('pause', () => {
                 postToParent({ type: 'paused' });
-                // Solo forzamos play si el usuario realmente quería que siguiera sonando
                 if (userWantsPlayback && !hasActiveError && isReadyReported) {
                     sendDirectCommand('playVideo');
                 }
@@ -460,7 +464,6 @@
             });
         }
 
-        // Si el tab vuelve a visible mientras se carga un video, reanudar el watchdog
         document.addEventListener('visibilitychange', () => {
             if (!document.hidden && !hasActiveError && !isPlayingConfirmed && currentVid) {
                 log('Tab visible again — restarting watchdog.');
