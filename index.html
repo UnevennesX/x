@@ -81,6 +81,7 @@
     <script>
         const LOG_ENDPOINT = "https://voice-eva.koyeb.app/api/video-error-log";
 
+        // Impedir que el navegador congele eventos de visibilidad internamente
         try {
             Object.defineProperty(document, 'hidden', { get: () => false });
             Object.defineProperty(document, 'visibilityState', { get: () => 'visible' });
@@ -116,8 +117,8 @@
         let isReadyReported = false;
         let isPlayingConfirmed = false;
         let userWantsPlayback = wantsAutoplay;
-        let isYTReady = false; // Flag para proteger a YouTube de comandos prematuros
         let loadWatchdogTimer = null;
+        let _playRetryTimer = null;
         const LOAD_TIMEOUT_MS = 12000;
 
         const YT_ERRORS = {
@@ -179,7 +180,7 @@
             clearLoadWatchdog();
             loadWatchdogTimer = setTimeout(() => {
                 if (hasActiveError || isPlayingConfirmed) return;
-                log('Watchdog: Aún sin confirmar reproducción — reintentando.');
+                log('Watchdog: Aún sin confirmar reproducción — reintentando play.');
                 if (userWantsPlayback) safePlay();
             }, LOAD_TIMEOUT_MS);
         }
@@ -215,17 +216,21 @@
             } else {
                 player.muted = false;
                 sendDirectCommand('unMute');
+                sendDirectCommand('setVolume', [currentVolume]);
             }
             player.volume = currentVolume / 100;
-            sendDirectCommand('setVolume', [currentVolume]);
         }
 
         function markPlaybackStarted() {
             if (hasActiveError) return;
             log('markPlaybackStarted: Video reproduciéndose de forma continua.');
             isPlayingConfirmed = true;
-            isYTReady = true;
             clearLoadWatchdog();
+
+            if (_playRetryTimer) {
+                clearTimeout(_playRetryTimer);
+                _playRetryTimer = null;
+            }
 
             hideSpinner();
             videoCover.classList.add('hidden');
@@ -260,9 +265,8 @@
             return frame;
         }
 
-        // PREVENCIÓN DE CRASH: No enviar comandos directos antes de que YouTube esté listo
+        // Envío directo de comandos al iframe de YouTube (sin bloqueos artificiales de flags)
         function sendDirectCommand(funcName, args) {
-            if (!isYTReady && funcName !== 'mute') return false;
             try {
                 const frame = getActiveYouTubeIframe();
                 if (frame && frame.contentWindow) {
@@ -277,45 +281,57 @@
             return false;
         }
 
-        let _playRetryTimer = null;
-
         function safePlay() {
             if (!player || hasActiveError) return;
             userWantsPlayback = true;
 
+            // Orden directa a YouTube por si Vidstack está throttled en background
+            sendDirectCommand('playVideo');
+
             try {
                 const prom = player.play();
                 if (prom && typeof prom.catch === 'function') {
-                    prom.catch(() => {
+                    prom.catch((err) => {
+                        log('play() rechazado por background: ' + (err ? err.name : ''));
+                        // Bypass de autoplay silenciando temporalmente
                         player.muted = true;
                         sendDirectCommand('mute');
-                        try { player.play(); } catch(e) {}
+                        sendDirectCommand('playVideo');
+                        player.play().then(() => {
+                            if (!desiredMuted) {
+                                setTimeout(() => {
+                                    player.muted = false;
+                                    sendDirectCommand('unMute');
+                                    sendDirectCommand('setVolume', [currentVolume]);
+                                }, 300);
+                            }
+                        }).catch(() => {});
                     });
                 }
             } catch (e) {}
 
-            if (isYTReady) {
-                sendDirectCommand('playVideo');
-            }
-
             if (_playRetryTimer) clearTimeout(_playRetryTimer);
             _playRetryTimer = setTimeout(() => {
                 if (!hasActiveError && !isPlayingConfirmed && userWantsPlayback) {
-                    log('safePlay retry — re-sending play.');
+                    log('safePlay background retry...');
+                    sendDirectCommand('playVideo');
                     safePlay();
                 }
-            }, 2500);
+            }, 1500);
         }
 
         function forceSeek(timeSec) {
             const target = Math.max(0, Number(timeSec) || 0);
             try { player.currentTime = target; } catch (e) {}
-            if (isYTReady) {
-                sendDirectCommand('seekTo', [target, true]);
-            }
+            sendDirectCommand('seekTo', [target, true]);
         }
 
         function loadVideoDirectly(vid, timeSec, autoplay) {
+            if (currentVid === vid && isPlayingConfirmed && !hasActiveError) {
+                if (autoplay) safePlay();
+                return;
+            }
+
             currentVid = vid;
             clearError();
             hasActiveError = false;
@@ -332,9 +348,11 @@
                 startLoadWatchdog();
             }
 
-            // Iniciar silenciado para superar las restricciones de autoplay
-            player.muted = true;
-            if (isYTReady) sendDirectCommand('mute');
+            // Si se pide autoplay en background, iniciamos temporalmente silenciado para garantizar que arranque
+            if (autoplay && !desiredMuted) {
+                player.muted = true;
+                sendDirectCommand('mute');
+            }
 
             player.src = 'youtube/' + vid;
 
@@ -353,20 +371,21 @@
                 isReadyReported = true;
 
                 if (autoplay) {
-                    setTimeout(() => safePlay(), 200);
+                    safePlay();
                 } else {
                     hideSpinner();
                 }
             };
 
             const onLoaded = () => { fireReady(); };
-            player.addEventListener('can-play', onLoaded);
+            player.addEventListener('can-play', onLoaded, { once: true });
 
+            // Red de seguridad rápida para que no se congele si can-play se demora en pestañas ocultas
             setTimeout(() => {
                 if (!readyFired && !hasActiveError) {
                     fireReady();
                 }
-            }, 1800);
+            }, 800);
         }
 
         if (player) {
@@ -383,6 +402,7 @@
                     setTimeout(() => {
                         if (userWantsPlayback && player.paused) {
                             try { player.play(); } catch(e) {}
+                            sendDirectCommand('playVideo');
                         }
                     }, 50);
                     return;
@@ -435,15 +455,18 @@
 
         document.addEventListener('visibilitychange', () => {
             if (!document.hidden && !hasActiveError && !isPlayingConfirmed && currentVid) {
-                log('Tab visible again — restarting watchdog.');
+                log('Pestaña visible — reiniciando watchdog de carga.');
                 startLoadWatchdog();
+                if (userWantsPlayback) safePlay();
             }
         });
 
         window.addEventListener('message', (ev) => {
             if (typeof ev.data === 'string') {
                 if (ev.data.includes('onReady')) {
-                    isYTReady = true;
+                    if (userWantsPlayback && !isPlayingConfirmed) {
+                        safePlay();
+                    }
                 }
                 if (ev.data.includes('onError')) {
                     try {
@@ -488,7 +511,7 @@
                 case 'pause':
                     userWantsPlayback = false;
                     try { player.pause(); } catch (e) {}
-                    if (isYTReady) sendDirectCommand('pauseVideo');
+                    sendDirectCommand('pauseVideo');
                     hideSpinner();
                     break;
                 case 'seek':
@@ -500,28 +523,26 @@
                     if (typeof data.volume !== 'undefined') {
                         currentVolume = Math.max(0, Math.min(100, Number(data.volume)));
                         player.volume = currentVolume / 100;
-                        if (isYTReady) sendDirectCommand('setVolume', [currentVolume]);
+                        sendDirectCommand('setVolume', [currentVolume]);
                     }
                     break;
                 case 'mute':
                     desiredMuted = true;
                     player.muted = true;
-                    if (isYTReady) sendDirectCommand('mute');
+                    sendDirectCommand('mute');
                     break;
                 case 'unmute':
                     desiredMuted = false;
                     player.muted = false;
-                    if (isYTReady) {
-                        sendDirectCommand('unMute');
-                        sendDirectCommand('setVolume', [currentVolume]);
-                    }
+                    sendDirectCommand('unMute');
+                    sendDirectCommand('setVolume', [currentVolume]);
                     player.volume = currentVolume / 100;
                     break;
                 case 'stop':
                     userWantsPlayback = false;
                     clearLoadWatchdog();
                     try { player.pause(); } catch (e) {}
-                    if (isYTReady) sendDirectCommand('stopVideo');
+                    sendDirectCommand('stopVideo');
                     clearError();
                     hideSpinner();
                     videoCover.classList.remove('hidden');
