@@ -149,10 +149,11 @@
             errorView.classList.remove('active');
         }
 
+        // SOLO SE OCULTA LA PANTALLA NEGRA SI REALMENTE ESTÁ SONANDO
         function markPlaybackStarted() {
             if (hasActiveError) return;
             hideSpinner();
-            videoCover.classList.add('hidden');
+            videoCover.classList.add('hidden'); // Aquí se destapa
             clearError();
 
             if (!isReadyReported) {
@@ -243,7 +244,6 @@
                 return;
             }
 
-            // Primera carga con Vidstack
             isVidstackInitialized = true;
             player.src = 'youtube/' + vid;
 
@@ -271,10 +271,10 @@
                 hideSpinner();
             }
 
+            // CORRECCIÓN CRÍTICA: Eliminamos el evento 'play' para no destapar la pantalla negra prematuramente.
+            // Solo escuchamos 'playing', que es cuando el video YA está reproduciéndose.
             player.addEventListener('playing', markPlaybackStarted);
-            player.addEventListener('play', markPlaybackStarted);
 
-            // CORRECCIÓN 1: No disparamos safePlay() a los 80ms para no chocar con la carga
             player.addEventListener('pause', () => {
                 if (userWantsPlayback && !hasActiveError && isReadyReported) {
                     sendDirectCommand('playVideo');
@@ -301,7 +301,7 @@
                 postToParent({ type: 'ended' });
             });
 
-            // CORRECCIÓN 2: Filtramos los falsos errores de Vidstack (AbortError, promesas canceladas)
+            // Filtro de errores: Ignoramos abortos y promesas interrumpidas
             player.addEventListener('error', (ev) => {
                 const detail = ev && ev.detail;
                 if (!detail) return;
@@ -309,14 +309,8 @@
                 const msg = String(detail.message || detail || '');
                 const name = String(detail.name || '');
 
-                // Si es solo una interrupción inofensiva de play(), se ignora
-                if (name === 'AbortError' || msg.includes('interrupted') || msg.includes('The play() request')) {
-                    return;
-                }
-                // Si es bloqueo temporal de interacción, se ignora
-                if (name === 'NotAllowedError' || msg.includes('interact')) {
-                    return;
-                }
+                if (name === 'AbortError' || msg.includes('interrupted') || msg.includes('The play() request')) return;
+                if (name === 'NotAllowedError' || msg.includes('interact')) return;
 
                 const code = detail.code || 0;
                 if (code >= 4) {
@@ -326,7 +320,6 @@
             });
         }
 
-        // CORRECCIÓN 3: Solo disparamos error si YouTube manda un código FATAL real
         window.addEventListener('message', (ev) => {
             if (typeof ev.data === 'string') {
                 if (ev.data.includes('onError')) {
@@ -334,7 +327,6 @@
                         const ytData = JSON.parse(ev.data);
                         if (ytData.event === 'onError' && typeof ytData.info !== 'undefined') {
                             const errCodeNum = Number(ytData.info);
-                            // 150/101 (Copyright), 100 (Privado/Borrado), 2/5 (ID inválido o decode HTML5)
                             if (errCodeNum === 150 || errCodeNum === 101 || errCodeNum === 100 || errCodeNum === 2 || errCodeNum === 5) {
                                 triggerError(errCodeNum);
                             }
@@ -344,7 +336,8 @@
                 if (ev.data.includes('onStateChange')) {
                     try {
                         const ytData = JSON.parse(ev.data);
-                        if (ytData.info === 1 || ytData.info === 3) {
+                        // Solo el estado 1 (PLAYING real) destapa la pantalla
+                        if (ytData.info === 1) {
                             markPlaybackStarted();
                         }
                         if (ytData.info === 2 && userWantsPlayback && !hasActiveError && isReadyReported) {
