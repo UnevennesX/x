@@ -79,6 +79,7 @@
     </div>
 
     <script>
+        // Evitar que el navegador suspenda la visibilidad
         try {
             Object.defineProperty(document, 'hidden', { get: () => false });
             Object.defineProperty(document, 'visibilityState', { get: () => 'visible' });
@@ -103,11 +104,8 @@
         let currentVid = initialVid || null;
         let hasActiveError = false;
         let isReadyReported = false;
-        let isPlayingConfirmed = false;
         let userWantsPlayback = wantsAutoplay;
         let isVidstackInitialized = false;
-        let loadWatchdogTimer = null;
-        const LOAD_TIMEOUT_MS = 12000;
 
         const ERRORS_MAP = {
             150: 'El autor bloqueó la reproducción externa o tiene restricciones de copyright.',
@@ -116,10 +114,6 @@
             2: 'Identificador de video de YouTube no válido.',
             5: 'Error de decodificación en el reproductor HTML5.'
         };
-
-        function log(msg) {
-            console.log('[X-Player]', msg);
-        }
 
         function postToParent(data) {
             try {
@@ -135,26 +129,9 @@
             spinner.classList.remove('active');
         }
 
-        function clearLoadWatchdog() {
-            if (loadWatchdogTimer) {
-                clearTimeout(loadWatchdogTimer);
-                loadWatchdogTimer = null;
-            }
-        }
-
-        function startLoadWatchdog() {
-            clearLoadWatchdog();
-            loadWatchdogTimer = setTimeout(() => {
-                if (hasActiveError || isPlayingConfirmed) return;
-                log('Watchdog: Tiempo de espera agotado (12s).');
-                triggerError(150);
-            }, LOAD_TIMEOUT_MS);
-        }
-
         function triggerError(code) {
             if (hasActiveError) return;
             hasActiveError = true;
-            clearLoadWatchdog();
             hideSpinner();
             videoCover.classList.remove('hidden');
 
@@ -171,34 +148,13 @@
         function clearError() {
             hasActiveError = false;
             errorView.classList.remove('active');
-            clearLoadWatchdog();
-        }
-
-        function enableAudioOnInteraction() {
-            const unmuteHandler = () => {
-                log('Interacción recibida: asegurando sonido activado.');
-                player.muted = false;
-                sendDirectCommand('unMute');
-                window.removeEventListener('click', unmuteHandler);
-                window.removeEventListener('keydown', unmuteHandler);
-                window.removeEventListener('touchstart', unmuteHandler);
-            };
-            window.addEventListener('click', unmuteHandler, { once: true });
-            window.addEventListener('keydown', unmuteHandler, { once: true });
-            window.addEventListener('touchstart', unmuteHandler, { once: true });
         }
 
         function markPlaybackStarted() {
             if (hasActiveError) return;
-            log('markPlaybackStarted: Video reproduciéndose.');
-            isPlayingConfirmed = true;
-            clearLoadWatchdog();
-
             hideSpinner();
-            videoCover.classList.add('hidden'); // Quita la pantalla negra
+            videoCover.classList.add('hidden');
             clearError();
-
-            enableAudioOnInteraction();
 
             if (!isReadyReported) {
                 isReadyReported = true;
@@ -210,6 +166,7 @@
             }
         }
 
+        // Obtener el iframe real de YouTube dentro de Vidstack
         function getActiveYouTubeIframe() {
             let frame = player.querySelector('iframe');
             if (!frame && player.shadowRoot) {
@@ -239,24 +196,17 @@
             return false;
         }
 
-        // REPRODUCCIÓN INTELIGENTE CON SONIDO
         function safePlay() {
             if (!player || hasActiveError) return;
             userWantsPlayback = true;
 
-            // Intentamos reproducir primero CON SONIDO
             sendDirectCommand('playVideo');
 
             try {
                 const prom = player.play();
                 if (prom && typeof prom.catch === 'function') {
-                    prom.catch((err) => {
-                        log('Navegador rechazó el audio de arranque. Muteando para salvar reproducción: ' + err);
-                        // Solo si el navegador da error por sonido, usamos mute de salvavidas
-                        player.muted = true;
-                        sendDirectCommand('mute');
+                    prom.catch(() => {
                         sendDirectCommand('playVideo');
-                        player.play().catch(() => {});
                     });
                 }
             } catch (e) {
@@ -273,39 +223,32 @@
         function loadVideoDirectly(vid, timeSec, autoplay) {
             currentVid = vid;
             clearError();
-            isPlayingConfirmed = false;
             isReadyReported = false;
             userWantsPlayback = !!autoplay;
-            
             showSpinner();
             videoCover.classList.remove('hidden');
 
             const t = Number(timeSec) || 0;
 
-            if (autoplay) {
-                startLoadWatchdog();
-            }
-
+            // Si Vidstack ya está inicializado y tiene el iframe vivo:
+            // NO TOCAMOS player.src (eso es lo que destruía el iframe en segundo plano).
             const iframe = getActiveYouTubeIframe();
             if (isVidstackInitialized && iframe) {
-                // Arranca CON SONIDO por defecto
-                player.muted = false;
-                sendDirectCommand('unMute');
-                
-                sendDirectCommand('loadVideoById', [vid, t]);
+                sendDirectCommand('loadVideoById', [{
+                    videoId: vid,
+                    startSeconds: t
+                }]);
                 
                 if (autoplay) {
-                    safePlay();
+                    setTimeout(() => safePlay(), 50);
                 } else {
                     hideSpinner();
                 }
                 return;
             }
 
+            // Primera carga: se inicializa Vidstack
             isVidstackInitialized = true;
-            
-            // Arranca CON SONIDO por defecto
-            player.muted = false;
             player.src = 'youtube/' + vid;
 
             const onLoaded = () => {
@@ -319,13 +262,8 @@
                 });
                 isReadyReported = true;
 
-                if (autoplay) {
-                    player.muted = false;
-                    sendDirectCommand('unMute');
-                    safePlay();
-                } else {
-                    hideSpinner();
-                }
+                if (autoplay) safePlay();
+                else hideSpinner();
             };
             player.addEventListener('can-play', onLoaded);
         }
@@ -338,16 +276,17 @@
             }
 
             player.addEventListener('playing', markPlaybackStarted);
+            player.addEventListener('play', markPlaybackStarted);
 
             player.addEventListener('pause', () => {
-                // Si se pausa durante el arranque (por rechazo de sonido), muteamos para forzar que ruede
-                if (userWantsPlayback && !hasActiveError && !isPlayingConfirmed) {
-                    log('Pausa durante el arranque. Aplicando mute para desbloquear...');
-                    player.muted = true;
-                    sendDirectCommand('mute');
+                // Si el navegador intenta pausar por estar en otra pestaña, forzamos a seguir sonando
+                if (userWantsPlayback && !hasActiveError) {
                     sendDirectCommand('playVideo');
-                } else if (userWantsPlayback && !hasActiveError && isReadyReported) {
-                    sendDirectCommand('playVideo');
+                    setTimeout(() => {
+                        if (userWantsPlayback && player.paused) {
+                            safePlay();
+                        }
+                    }, 80);
                 }
             });
 
@@ -373,19 +312,8 @@
 
             player.addEventListener('error', (ev) => {
                 const detail = ev && ev.detail;
-                if (!detail) return;
-                
-                const msg = String(detail.message || detail || '');
-                const name = String(detail.name || '');
-
-                if (name === 'AbortError' || msg.includes('interrupted') || msg.includes('The play() request')) return;
-                if (name === 'NotAllowedError' || msg.includes('interact')) return;
-
-                const code = detail.code || 0;
-                if (code >= 4) {
-                    const err = detail.message || detail.error || code || 'Playback Error';
-                    triggerError(err);
-                }
+                const err = (detail && (detail.code || detail.message || detail.error)) || 'Playback Error';
+                triggerError(err);
             });
         }
 
@@ -394,19 +322,19 @@
                 if (ev.data.includes('onError')) {
                     try {
                         const ytData = JSON.parse(ev.data);
-                        if (ytData.event === 'onError' && typeof ytData.info !== 'undefined') {
-                            const errCodeNum = Number(ytData.info);
-                            if (errCodeNum === 150 || errCodeNum === 101 || errCodeNum === 100 || errCodeNum === 2 || errCodeNum === 5) {
-                                triggerError(errCodeNum);
-                            }
-                        }
+                        if (ytData.event === 'onError' && ytData.info) triggerError(ytData.info);
                     } catch (e) {}
                 }
                 if (ev.data.includes('onStateChange')) {
                     try {
                         const ytData = JSON.parse(ev.data);
+                        // Estado 1 = PLAYING
                         if (ytData.info === 1) {
                             markPlaybackStarted();
+                        }
+                        // Estado 2 = PAUSED
+                        if (ytData.info === 2 && userWantsPlayback && !hasActiveError) {
+                            sendDirectCommand('playVideo');
                         }
                     } catch (e) {}
                 }
@@ -424,22 +352,26 @@
                         loadVideoDirectly(data.videoId, data.time, data.autoplay);
                     }
                     break;
+
                 case 'play':
                 case 'keepalive':
                     userWantsPlayback = true;
                     if (!hasActiveError) safePlay();
                     break;
+
                 case 'pause':
                     userWantsPlayback = false;
                     try { player.pause(); } catch (e) {}
                     sendDirectCommand('pauseVideo');
                     hideSpinner();
                     break;
+
                 case 'seek':
                     if (typeof data.time !== 'undefined') {
                         forceSeek(Number(data.time));
                     }
                     break;
+
                 case 'setVolume':
                     if (typeof data.volume !== 'undefined') {
                         const v = Math.max(0, Math.min(100, Number(data.volume)));
@@ -447,18 +379,22 @@
                         sendDirectCommand('setVolume', [v]);
                     }
                     break;
+
                 case 'mute':
                     player.muted = true;
                     sendDirectCommand('mute');
                     break;
+
                 case 'unmute':
                     player.muted = false;
                     sendDirectCommand('unMute');
                     break;
+
                 case 'stop':
                     userWantsPlayback = false;
-                    clearLoadWatchdog();
-                    try { player.pause(); } catch (e) {}
+                    try {
+                        player.pause();
+                    } catch (e) {}
                     sendDirectCommand('stopVideo');
                     clearError();
                     hideSpinner();
