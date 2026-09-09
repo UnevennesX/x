@@ -178,8 +178,8 @@
             clearLoadWatchdog();
             loadWatchdogTimer = setTimeout(() => {
                 if (hasActiveError || isPlayingConfirmed) return;
-                log('Watchdog: Tiempo de espera agotado (12s).');
-                triggerError(150);
+                log('Watchdog: Aún sin confirmar reproducción — reintentando (sin error).');
+                if (userWantsPlayback) safePlay();
             }, LOAD_TIMEOUT_MS);
         }
 
