@@ -116,6 +116,7 @@
         let unmutedSuccessfully = false;
         let loadWatchdogTimer = null;
         let _playRetryTimer = null;
+        let _warmupCompleted = false;
         const LOAD_TIMEOUT_MS = 6000;
 
         const YT_ERRORS = {
@@ -460,6 +461,29 @@
             const action = data.cmd || data.type;
 
             switch (action) {
+                case 'warmup':
+                    // Precarga temprana: inicializar los controladores de audio de Vidstack/YouTube
+                    // con anticipación para que cuando llegue 'load' esté todo listo en RAM.
+                    if (!_warmupCompleted) {
+                        _warmupCompleted = true;
+                        try {
+                            // Forzar que Vidstack/YT inicialice sus frames internos
+                            player.muted = true;
+                            sendDirectCommand('mute');
+                            // Intentar una reproducción silenciada para que YouTube cree el iframe interno
+                            const warmupPromise = player.play();
+                            if (warmupPromise && warmupPromise.catch) {
+                                warmupPromise.catch(() => {});
+                            }
+                            setTimeout(() => {
+                                try { player.pause(); } catch (e) {}
+                                postToParent({ type: 'warmup-ready' });
+                            }, 800);
+                        } catch (e) {
+                            postToParent({ type: 'warmup-ready' });
+                        }
+                    }
+                    break;
                 case 'load':
                     if (data.videoId) {
                         if (typeof data.volume !== 'undefined') currentVolume = Math.max(0, Math.min(100, Number(data.volume)));
